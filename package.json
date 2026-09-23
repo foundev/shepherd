@@ -1,0 +1,42 @@
+{
+  "name": "shepherd",
+  "version": "0.1.0",
+  "description": "A modern React and Ink terminal runtime for coding agents",
+  "type": "module",
+  "license": "Apache-2.0",
+  "bin": {
+    "shepherd": "./bin/shepherd"
+  },
+  "scripts": {
+    "dev": "tsx src/cli.ts",
+    "prebuild": "node -e \"require('node:fs').rmSync('dist', { recursive: true, force: true })\"",
+    "build": "tsc -p tsconfig.build.json",
+    "start": "node bin/shepherd",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run",
+    "bench-render-scale": "tsx scripts/bench-render-scale.tsx",
+    "preview-agent-desk": "tsx scripts/preview-agent-desk.tsx"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "dependencies": {
+    "@xterm/headless": "^5.5.0",
+    "commander": "^14.0.1",
+    "ink": "^6.2.0",
+    "node-pty": "1.0.0",
+    "react": "^19.1.0",
+    "smol-toml": "^1.8.0"
+  },
+  "devDependencies": {
+    "@types/node": "^24.10.1",
+    "@types/react": "^19.1.0",
+    "ink-testing-library": "4.0.0",
+    "tsx": "^4.20.0",
+    "typescript": "^5.9.2",
+    "vitest": "5.0.1"
+  },
+  "allowScripts": {
+    "node-pty@1.0.0": true
+  }
+}
