@@ -1994,7 +1994,9 @@ export class ShepherdDaemon {
       return;
     }
     const pane = this.requirePane(paneId);
-    if (pane.agent || pane.task) {
+    // Preserve output for an explicit command/agent run, but never leave the
+    // user's interactive shell pane behind after they type `exit`.
+    if (pane.command !== null && (pane.agent || pane.task)) {
       pane.detector.exited(Date.now(), false);
       pane.task = updateTask(pane.task, { review: "requested",
         ...(pane.exitCode ? { blocker: `Process exited with code ${pane.exitCode}; inspect its output` } : {}),

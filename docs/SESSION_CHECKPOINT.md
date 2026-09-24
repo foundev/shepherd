@@ -12,8 +12,9 @@ inspiration in the README; Shepherd's design and implementation evolve independe
   requests persist. Looking at a terminal does not acknowledge its task review.
 - Status includes evidence and confidence. Unrecognized screens stay unknown;
   integration reports expire. Ordinary completion prose does not imply idle.
-- Tracked agent/task panes remain available after exit for inspection. Their
-  completed commands are not automatically rerun on restoration.
+- Command-backed agent/task panes remain available after exit for inspection.
+  Interactive shell panes close when their shell exits. Completed commands are
+  not automatically rerun on restoration.
 - The CLI and typed API support task reporting, check summaries, review,
   changed-file inspection, expiring status reports, and guarded prompt delivery.
 - Claude integration version 3 captures prompt and lifecycle context. Existing

@@ -4,6 +4,7 @@ import path from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { ClientConnection } from "../src/client/connection.js";
 import { ShepherdDaemon } from "../src/server/daemon.js";
+import { paneIds } from "../src/server/layout.js";
 import { connect } from "../src/transport.js";
 import type { StateView } from "../src/types.js";
 
@@ -74,6 +75,28 @@ describe("pane lifecycle", () => {
       )
     );
     expect(state.tabs.some((tab) => tab.id === tabId)).toBe(false);
+  });
+
+  it("closes an interactive shell with task context when it exits", async () => {
+    let state = await request({ type: "tab.create", name: "shell task" });
+    const shellPaneId = state.focusedPaneId;
+    await connection.request({
+      type: "task.update",
+      paneId: shellPaneId,
+      patch: { title: "Shell-backed task" },
+    });
+    await request({
+      type: "pane.input",
+      paneId: shellPaneId,
+      data: "exit\r",
+    });
+
+    state = await waitForState((next) =>
+      !next.panes.some((pane) => pane.id === shellPaneId)
+    );
+    expect(state.workspaces.some((workspace) =>
+      workspace.tabs.some((tab) => paneIds(tab.layout).includes(shellPaneId))
+    )).toBe(false);
   });
 
   it("starts new panes in the workspace root by default", async () => {
