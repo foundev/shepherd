@@ -104,7 +104,7 @@ export interface ShepherdConfig {
     /** Modifiers that send right-clicks to the pane app; null = off. */
     right_click_passthrough_modifier: { ctrl: boolean; alt: boolean; super: boolean } | null;
     sidebar: SidebarConfig;
-    agent_panel_sort: "spaces" | "priority";
+    agent_panel_sort: "spaces" | "status";
     accent: string;
     toast: {
       delivery: "off" | "shepherd" | "terminal" | "system";
@@ -192,7 +192,7 @@ export const DEFAULT_CONFIG: ShepherdConfig = {
     show_agent_labels_on_pane_borders: false,
     right_click_passthrough_modifier: null,
     sidebar: defaultSidebarConfig(),
-    agent_panel_sort: "priority",
+    agent_panel_sort: "status",
     accent: "",
     // Enable Shepherd toasts by default.
     // yet, so in-app toasts are on by default.
@@ -485,12 +485,17 @@ export function parseConfig(
       config.ui.pane_borders,
     );
   }
-  const sort = ui.agent_panel_sort === "workspaces" ? "spaces" : undefined;
+  // Legacy aliases: "workspaces" for "spaces", "priority" for "status".
+  const sort = ui.agent_panel_sort === "workspaces"
+    ? "spaces"
+    : ui.agent_panel_sort === "priority"
+      ? "status"
+      : undefined;
   config.ui.agent_panel_sort = sort ?? reader.oneOf(
     ui,
     "agent_panel_sort",
     "ui",
-    ["spaces", "priority"],
+    ["spaces", "status"],
     config.ui.agent_panel_sort,
   );
   config.ui.window_title = reader.string(ui, "window_title", "ui", config.ui.window_title);
