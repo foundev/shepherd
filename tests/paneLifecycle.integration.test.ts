@@ -4,6 +4,7 @@ import path from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { ClientConnection } from "../src/client/connection.js";
 import { ShepherdDaemon } from "../src/server/daemon.js";
+import { paneIds } from "../src/server/layout.js";
 import { connect } from "../src/transport.js";
 import type { StateView } from "../src/types.js";
 
@@ -74,6 +75,40 @@ describe("pane lifecycle", () => {
       )
     );
     expect(state.tabs.some((tab) => tab.id === tabId)).toBe(false);
+  });
+
+  it.each(["task", "agent"])("closes an interactive shell with %s metadata when it exits", async (metadata) => {
+    let state = await request({ type: "tab.create", name: "shell task" });
+    const shellPaneId = state.focusedPaneId;
+    expect(state.panes.find((pane) => pane.id === shellPaneId)?.command).toBeNull();
+    if (metadata === "task") {
+      await connection.request({ type: "task.update", paneId: shellPaneId, patch: { title: "Shell-backed task" } });
+    } else {
+      await connection.request({ type: "pane.report_agent", paneId: shellPaneId, agent: "claude", source: "fixture", state: "working" });
+    }
+    await request({
+      type: "pane.input",
+      paneId: shellPaneId,
+      data: "exit\r",
+    });
+
+    state = await waitForState((next) =>
+      !next.panes.some((pane) => pane.id === shellPaneId)
+    );
+    expect(state.workspaces.some((workspace) =>
+      workspace.tabs.some((tab) => paneIds(tab.layout).includes(shellPaneId))
+    )).toBe(false);
+  });
+
+  it("retains a successful command-backed task for review", async () => {
+    let state = await request({ type: "pane.create", command: "read line; printf 'completed task'; exit 0" });
+    const paneId = state.focusedPaneId;
+    await connection.request({ type: "task.update", paneId, patch: { title: "Command-backed task" } });
+    await request({ type: "pane.input", paneId, data: "\r" });
+    state = await waitForState((next) => next.panes.some((pane) => pane.id === paneId && pane.exitCode === 0 && pane.task?.review === "requested"));
+    expect(state.panes.find((pane) => pane.id === paneId)).toMatchObject({ task: { title: "Command-backed task", review: "requested", checkStatus: "unknown" } });
+    expect(JSON.stringify(await connection.request({ type: "pane.snapshot", paneId, rows: 10 }))).toContain("completed task");
+    await request({ type: "pane.close", paneId });
   });
 
   it("starts new panes in the workspace root by default", async () => {

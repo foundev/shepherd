@@ -1984,8 +1984,8 @@ export class ShepherdDaemon {
     }
   }
 
-  /** A pane whose process exits is removed; the last pane closes its tab and
-   * the last tab closes its workspace. */
+  /** Exited command-backed tasks stay available for review. Other panes are
+   * removed; the last pane closes its tab and the last tab its workspace. */
   private handlePaneExit(paneId: string): void {
     if (this.stopping || !this.panes.has(paneId)) return;
     void this.emitEvent("pane.exited", { paneId, exitCode: this.requirePane(paneId).exitCode });
@@ -1994,7 +1994,9 @@ export class ShepherdDaemon {
       return;
     }
     const pane = this.requirePane(paneId);
-    if (pane.agent || pane.task) {
+    // Preserve output for an explicit command/agent run, but never leave the
+    // user's interactive shell pane behind after they type `exit`.
+    if (pane.command !== null && (pane.agent || pane.task)) {
       pane.detector.exited(Date.now(), false);
       pane.task = updateTask(pane.task, { review: "requested",
         ...(pane.exitCode ? { blocker: `Process exited with code ${pane.exitCode}; inspect its output` } : {}),

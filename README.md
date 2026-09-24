@@ -243,10 +243,11 @@ machines to this version for task editing and guarded prompt delivery.
 
 Detaching preserves the running processes. A daemon restart can recreate
 commands or request an agent session resume; resumed panes are marked so
-they can be verified. Exited agent/task panes retain their output for review
-until explicitly closed. Completed commands are not rerun on restoration;
-their task context is restored beside a new shell. Terminal history across
-daemon restarts still requires `experimental.pane_history`.
+they can be verified. Exited command-backed agent/task panes retain their
+output for review until explicitly closed; interactive shell panes close when
+their shell exits. Completed commands are not rerun on restoration; their task
+context is restored beside a new shell. Terminal history across daemon
+restarts still requires `experimental.pane_history`.
 
 ## Automation API
 
