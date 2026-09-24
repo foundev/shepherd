@@ -58,19 +58,19 @@ claims that another TUI toolkit could never reproduce the same behavior.
 | Terminal workspaces | PTY panes, splits, resize, zoom, swap, copy mode, scrollback | Validate graphics handling and small-terminal behavior |
 | Persistence | Detached daemon, snapshots, pane history, agent resume, experimental live handoff | Document failure and recovery paths in the UI |
 | Agent awareness | Status evidence, expiring integration reports, explicit uncertainty, lifecycle hooks, notifications | Configurable detection rules, direct attach, real-agent detection accuracy measurements |
-| Agent desk | Attention queue across machines, stable selection, bounded card viewport, live output and checkout changes, persistent task context, independent review and checks | Sustained real workloads across dozens of agents |
+| Agent supervision | Sidebar agent panel grouped by space or attention status, persistent task context, independent review and checks | Sustained real workloads across dozens of agents |
 | Remote work | SSH attach, saved machines, reconnecting bridges, remote pane browsing | Decide whether remote panes can share local layouts |
 | Extensibility | Executable plugins, marketplace search, socket API, CLI | Close unsupported API and pane input operations |
 | Interface | Sidebar, status list, settings, mouse menus, phone-width view, dark and light themes | Improve first-run guidance, visual hierarchy, and keyboard discoverability |
 
 ## Next milestones
 
-The Agent desk is Shepherd's own supervision workflow. Its usefulness is judged
+Agent supervision is Shepherd's own workflow. Its usefulness is judged
 with many agents: can someone find the oldest blocker, understand its task,
 inspect its evidence, act, and return to the queue without losing their place?
 Task context and review requests persist independently of terminal visibility.
 Screen silence is uncertainty; a response ending is an invitation to review.
-The preview script and 50-agent interaction tests exercise this design with
+The 50-agent interaction tests exercise this design with
 simulated workloads. They do not establish real-agent detection accuracy or
 long-duration terminal performance.
 

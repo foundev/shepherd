@@ -105,7 +105,6 @@ import { ToastStack, type ToastEntry } from "./overlays.js";
 import { comboKey, type Action } from "../config/keybinds.js";
 import { defaultLoadedConfig, loadConfig, type LoadedConfig } from "../config/model.js";
 import { HelpOverlay, ConfirmOverlay } from "./overlays.js";
-import { AgentDesk, type AgentDeskHandle } from "./AgentDesk.js";
 import {
   editText,
   fieldParts,
@@ -140,7 +139,7 @@ const NO_STRIP = { ctrl: false, alt: false };
 
 /** The global menu, shared by its popup and the phone-width switcher. */
 const GLOBAL_MENU: Array<{ label: string; action: Action }> = [
-  { label: "agent desk", action: "agent_desk" },
+  { label: "toggle agent grouping", action: "toggle_agent_sort" },
   { label: "settings", action: "settings" },
   { label: "keybinds", action: "help" },
   { label: "reload config", action: "reload_config" },
@@ -184,8 +183,6 @@ export function App({
   const [helpOpen, setHelpOpen] = useState(false);
   const [helpFilter, setHelpFilter] = useState("");
   const [navigator, setNavigator] = useState<NavigatorState | null>(null);
-  const [deskOpen, setDeskOpen] = useState(false);
-  const deskRef = useRef<AgentDeskHandle>(null);
   const [settings, setSettings] = useState<SettingsState | null>(null);
   /** Session-modal popup terminal opened by this client. */
   const [popup, setPopup] = useState<{
@@ -213,7 +210,7 @@ export function App({
   const [remoteScope, setRemoteScope] = useState<
     { machineId: string; workspaceId: string } | null
   >(null);
-  const [agentSort, setAgentSort] = useState(config.ui.agent_panel_sort);
+  const [agentSort, setAgentSort] = useState<"spaces" | "status">(config.ui.agent_panel_sort);
   const sidebarDrag = useRef(false);
   /** Tab or workspace being dragged to a new position. */
   const reorderDrag = useRef<{
@@ -766,7 +763,7 @@ export function App({
   const overlayOpen = Boolean(
     pluginPickerOpen || renameMode || remoteMode || remotePaneMode ||
       remoteDashboardOpen || helpOpen || confirm || navigator || menu || popup ||
-      settings || deskOpen,
+      settings,
   );
   const popupSurface = popup ? surfaces[popup.paneId] : undefined;
   useEffect(() => {
@@ -1270,9 +1267,6 @@ export function App({
       case "agent":
         void connection.request({ type: "pane.focus", paneId: target.paneId });
         return;
-      case "agent-desk":
-        setDeskOpen(true);
-        return;
       case "tab":
         void connection.request({ type: "tab.select", tabId: target.id });
         return;
@@ -1289,7 +1283,7 @@ export function App({
         runKeyAction("next_tab");
         return;
       case "agent-sort":
-        setAgentSort((current) => current === "priority" ? "spaces" : "priority");
+        setAgentSort((current) => current === "status" ? "spaces" : "status");
         return;
       case "sidebar-toggle":
         setSidebarCollapsed((collapsed) => !collapsed);
@@ -1793,10 +1787,6 @@ export function App({
   let keyForwarded = false;
 
   const dispatchToken = (token: InputToken): boolean => {
-    if (deskOpen && (token.kind === "key" || token.kind === "paste" || token.kind === "mouse")) {
-      deskRef.current?.input(token);
-      return true;
-    }
     if (token.kind === "mouse") {
       handleMouseInput(token.event);
       return false;
@@ -2745,8 +2735,8 @@ export function App({
     if (!state) return;
     const focusedPaneId = state.focusedPaneId;
     switch (action) {
-      case "agent_desk":
-        setDeskOpen(true);
+      case "toggle_agent_sort":
+        setAgentSort((current) => current === "status" ? "spaces" : "status");
         return;
       case "help":
         setHelpFilter("");
@@ -3129,7 +3119,7 @@ export function App({
       segments = [
         badge(" PREFIX "), plain(" "), key("esc"), plain(" cancel  "),
         key(keymap.prefix), plain(" send prefix  "),
-        key(shortcut("agent_desk")), plain(" agent desk  "),
+        key(shortcut("toggle_agent_sort")), plain(" agents  "),
         key(shortcut("workspace_picker")), plain(" workspace nav  "),
         key(shortcut("help")), plain(" keybinds"),
       ];
@@ -3477,16 +3467,6 @@ export function App({
           indicators={config.ui.status_indicators}
         />
       )}
-      {deskOpen && <Box position="absolute" width={columns} height={rows}><AgentDesk ref={deskRef} state={state} connection={connection} columns={columns} rows={rows}
-        onClose={() => setDeskOpen(false)} refresh={refreshState}
-        onOpen={async (entry) => {
-          if (entry.machineId) {
-            openRemoteWorkspace(entry.machineId, entry.workspace?.id ?? "");
-          } else {
-            await connection.request({ type: "pane.focus", paneId: entry.pane.id });
-          }
-          setDeskOpen(false);
-        }} /></Box>}
       {settings && (
         <SettingsOverlay settings={settings} config={config} columns={columns} rows={rows} />
       )}

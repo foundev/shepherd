@@ -10,7 +10,7 @@ export const ACTIONS = [
   "open_notification_target",
   "workspace_picker",
   "goto",
-  "agent_desk",
+  "toggle_agent_sort",
   "new_workspace",
   "new_worktree",
   "open_worktree",
@@ -80,7 +80,7 @@ export const DEFAULT_BINDINGS: Record<Action, string[]> = {
   open_notification_target: ["prefix+o"],
   workspace_picker: ["prefix+w"],
   goto: ["prefix+g"],
-  agent_desk: ["prefix+d"],
+  toggle_agent_sort: ["prefix+d"],
   new_workspace: ["prefix+shift+n"],
   new_worktree: ["prefix+shift+g"],
   open_worktree: [],
@@ -136,6 +136,7 @@ export const DEFAULT_BINDINGS: Record<Action, string[]> = {
 /** Legacy names accepted in config files. */
 export const ACTION_ALIASES: Record<string, Action> = {
   fullscreen: "zoom",
+  agent_desk: "toggle_agent_sort",
 };
 
 export interface KeyLike {

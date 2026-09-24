@@ -2,8 +2,7 @@ import type { PaneView, StateView, WorkspaceView } from "./types.js";
 import { paneIds } from "./server/layout.js";
 
 export type DeskLane = "blocked" | "review" | "unknown" | "working" | "ready";
-export type DeskFilter = "attention" | "all" | DeskLane;
-export const DESK_FILTERS: DeskFilter[] = ["attention", "all", "blocked", "review", "unknown", "working", "ready"];
+export const LANE_ORDER: DeskLane[] = ["blocked", "review", "unknown", "working", "ready"];
 export const LANE_LABELS: Record<DeskLane, string> = {
   blocked: "NEEDS YOU", review: "REVIEW", unknown: "CHECK STATUS", working: "WORKING", ready: "READY",
 };
@@ -56,23 +55,5 @@ export function deskEntries(state: StateView): DeskEntry[] {
       cwd: pane.cwd ?? "", updatedAt: pane.updatedAt ?? machine.checkedAt ?? "" })), machine.remote.workspaceList,
     machine.id, machine.label, machine.status === "online" && machine.reachable);
   }
-  const order: DeskLane[] = ["blocked", "review", "unknown", "working", "ready"];
-  return result.sort((a, b) => order.indexOf(a.lane) - order.indexOf(b.lane) || a.since - b.since || a.key.localeCompare(b.key, undefined, { numeric: true }));
-}
-
-export function filterDesk(entries: DeskEntry[], filter: DeskFilter, query: string): DeskEntry[] {
-  const words = query.toLowerCase().trim().split(/\s+/).filter(Boolean);
-  return entries.filter(entry => {
-    if (filter === "attention" ? ["working", "ready"].includes(entry.lane) : filter !== "all" && entry.lane !== filter) return false;
-    const { pane } = entry;
-    const text = [pane.id, pane.agent, pane.title, pane.cwd, pane.task?.title, pane.task?.summary, pane.task?.blocker,
-      pane.task?.nextAction, entry.workspaceLabel, entry.workspace?.git?.branch, entry.machineLabel, entry.tabLabel].join(" ").toLowerCase();
-    return words.every(word => text.includes(word));
-  });
-}
-
-export function ageLabel(at: number, now: number): string {
-  if (!at) return "";
-  const seconds = Math.max(0, Math.floor((now - at) / 1000));
-  return seconds < 60 ? `${seconds}s` : seconds < 3600 ? `${Math.floor(seconds / 60)}m` : `${Math.floor(seconds / 3600)}h`;
+  return result.sort((a, b) => LANE_ORDER.indexOf(a.lane) - LANE_ORDER.indexOf(b.lane) || a.since - b.since || a.key.localeCompare(b.key, undefined, { numeric: true }));
 }

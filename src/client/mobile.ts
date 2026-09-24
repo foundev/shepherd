@@ -156,7 +156,7 @@ function agentSummary(
 }
 
 export interface SwitcherOptions extends MobileOptions {
-  sort: "spaces" | "priority";
+  sort: "spaces" | "status" | "priority";
   /** Workspace highlighted by keyboard navigation. */
   navigateWorkspaceId: string | null;
   /** Labels of the global menu, in order. */

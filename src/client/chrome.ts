@@ -2,7 +2,7 @@
  * Rendering and mouse hit-testing both use these models. */
 import { paneIds } from "../server/layout.js";
 import { applyAgentView } from "../agentView.js";
-import { deskEntries, deskLane } from "../agentDesk.js";
+import { deskEntries, deskLane, LANE_LABELS, LANE_ORDER, type DeskLane } from "../agentDesk.js";
 import { defaultSidebarConfig, type SidebarConfig } from "../config/sidebar.js";
 import type {
   AgentStatus,
@@ -29,7 +29,6 @@ export type ClickTarget =
   | { kind: "new-workspace" }
   | { kind: "menu" }
   | { kind: "agent-sort" }
-  | { kind: "agent-desk" }
   | { kind: "sidebar-toggle" }
   | { kind: "tab"; id: string }
   | { kind: "new-tab" }
@@ -101,7 +100,7 @@ export function agentSummarySegments(state: StateView, pulse = 0): Segment[] {
         : entries.length > 0
           ? { text: ` ○ ${entries.length} READY `, color: theme.success }
           : { text: " ○ NO AGENTS ", color: theme.muted };
-  return [{ ...summary, backgroundColor: theme.surface0, bold: true, target: { kind: "agent-desk" } }];
+  return [{ ...summary, backgroundColor: theme.surface0, bold: true, target: { kind: "agent-sort" } }];
 }
 
 export function workspaceLabel(workspace: WorkspaceView): string {
@@ -131,9 +130,17 @@ export interface AgentEntry {
   tabIndex: number;
 }
 
+/** Sidebar agent grouping: by workspace ("spaces") or by attention status. */
+export type AgentSort = "spaces" | "status";
+
+/** Maps legacy sort names ("priority" → "status") to the current grouping. */
+export function normalizeAgentSort(sort: string): AgentSort {
+  return sort === "spaces" ? "spaces" : "status";
+}
+
 export function agentEntries(
   state: StateView,
-  sort: "spaces" | "priority",
+  sort: AgentSort | "priority",
   view: AgentViewSpec | null = state.agentView ?? null,
 ): AgentEntry[] {
   let entries: AgentEntry[] = [];
@@ -169,14 +176,35 @@ export function agentEntries(
     );
     if (view.sort.length > 0) return entries;
   }
-  if (sort === "priority") {
-    const lanes = ["blocked", "review", "unknown", "working", "ready"];
+  if (normalizeAgentSort(sort) === "status") {
     entries.sort((left, right) =>
-      lanes.indexOf(deskLane(left.pane)) - lanes.indexOf(deskLane(right.pane)) ||
+      LANE_ORDER.indexOf(deskLane(left.pane)) - LANE_ORDER.indexOf(deskLane(right.pane)) ||
       left.pane.updatedAt.localeCompare(right.pane.updatedAt)
     );
   }
   return entries;
+}
+
+/** Status-group header color per attention lane. */
+function laneColor(lane: DeskLane): string {
+  switch (lane) {
+    case "blocked": return theme.danger;
+    case "review": return theme.cyan;
+    case "working": return theme.warning;
+    case "ready": return theme.success;
+    default: return theme.muted;
+  }
+}
+
+/** Status-group header glyph per attention lane. */
+function laneGlyph(lane: DeskLane): string {
+  switch (lane) {
+    case "blocked": return "×";
+    case "review": return "◇";
+    case "working": return "◐";
+    case "ready": return "○";
+    default: return "?";
+  }
 }
 
 export function truncateText(text: string, width: number): string {
@@ -216,7 +244,7 @@ export interface SidebarOptions {
   focusedPaneId: string;
   activeWorkspaceId: string;
   indicators: "dots" | "symbols";
-  sort: "spaces" | "priority";
+  sort: AgentSort | "priority";
   mouse: boolean;
   /** Workspace highlighted in navigate mode. */
   navigateWorkspaceId: string | null;
@@ -572,14 +600,15 @@ function expandedRows(state: StateView, options: SidebarOptions): ChromeRow[] {
     rows[agentsTop] = { segments: [{ text: "─".repeat(width), color: theme.surfaceDim }] };
   }
   const agents = agentEntries(state, options.sort);
+  const grouped = normalizeAgentSort(options.sort) === "status";
   if (agentsTop + 1 < height) {
     rows[agentsTop + 1] = {
       segments: rightAligned(
-        [{ text: ` AGENTS ${agents.length}`, color: theme.subtext, bold: true, target: { kind: "agent-desk" } }],
+        [{ text: ` AGENTS ${agents.length}`, color: theme.subtext, bold: true }],
         [state.agentView
           ? { text: state.agentView.label ?? "view", color: theme.brand, bold: true }
           : {
-            text: options.sort === "priority" ? "priority" : "grouped",
+            text: grouped ? "status" : "spaces",
             color: theme.muted,
             bold: true,
             target: { kind: "agent-sort" },
@@ -589,14 +618,14 @@ function expandedRows(state: StateView, options: SidebarOptions): ChromeRow[] {
     };
   }
   const agentRows: ChromeRow[] = [];
-  agents.forEach((entry, entryIndex) => {
+  const pushAgent = (entry: AgentEntry) => {
     const focused = entry.pane.id === options.focusedPaneId;
     const target: ClickTarget = { kind: "agent", paneId: entry.pane.id };
     const background = focused ? theme.activeRow : undefined;
     const pane = entry.pane;
     const showTab = entry.workspace.tabs.length > 1 || Boolean(entry.tab.name);
     const title = pane.terminalTitle || null;
-    const rows = resolveRows(
+    const tokenRows = resolveRows(
       sidebar.agents.rows_by_agent[pane.agent ?? ""] ?? sidebar.agents.rows,
       {
         state_icon: statusIcon(pane.status, options.indicators),
@@ -617,7 +646,7 @@ function expandedRows(state: StateView, options: SidebarOptions): ChromeRow[] {
       workspace: { color: focused ? theme.text : theme.subtext, bold: true },
       secondary: theme.muted,
     };
-    (rows.length > 0 ? rows : [[{ kind: "state_icon" as const, text: statusIcon(pane.status, options.indicators), style: {} }]])
+    (tokenRows.length > 0 ? tokenRows : [[{ kind: "state_icon" as const, text: statusIcon(pane.status, options.indicators), style: {} }]])
       .forEach((tokens, rowIndex) => {
         const indent = rowIndex === 0 ? " " : "   ";
         agentRows.push({
@@ -626,17 +655,42 @@ function expandedRows(state: StateView, options: SidebarOptions): ChromeRow[] {
           segments: [{ text: indent }, ...tokenSegments(tokens, colors, width - indent.length)],
         });
       });
-    if (entryIndex < agents.length - 1) {
-      for (let gap = 0; gap < sidebar.agents.row_gap; gap += 1) agentRows.push({ segments: [] });
+  };
+  if (grouped) {
+    for (const lane of LANE_ORDER) {
+      const group = agents.filter((entry) => deskLane(entry.pane) === lane);
+      if (group.length === 0) continue;
+      if (agentRows.length > 0) agentRows.push({ segments: [] });
+      agentRows.push({
+        segments: fit([
+          { text: ` ${laneGlyph(lane)} ${LANE_LABELS[lane]}`, color: laneColor(lane), bold: true },
+          { text: ` ${group.length}`, color: theme.muted },
+        ], width),
+      });
+      group.forEach((entry, index) => {
+        pushAgent(entry);
+        if (index < group.length - 1) {
+          for (let gap = 0; gap < sidebar.agents.row_gap; gap += 1) agentRows.push({ segments: [] });
+        }
+      });
     }
-  });
+  } else {
+    agents.forEach((entry, entryIndex) => {
+      pushAgent(entry);
+      if (entryIndex < agents.length - 1) {
+        for (let gap = 0; gap < sidebar.agents.row_gap; gap += 1) agentRows.push({ segments: [] });
+      }
+    });
+  }
   const agentsBody = agentsTop + 3;
-  for (let index = 0; agentsBody + index < height - 1; index += 1) {
+  const visibleCapacity = Math.max(0, height - 1 - agentsBody);
+  for (let index = 0; index < visibleCapacity; index += 1) {
     const row = agentRows[index];
     if (row) rows[agentsBody + index] = row;
   }
-  if (agentRows.length > height - 1 - agentsBody && height > agentsBody + 1) {
-    rows[height - 2] = { target: { kind: "agent-desk" }, segments: [{ text: " … open agent desk", color: theme.brand, bold: true }] };
+  const hidden = agentRows.length - visibleCapacity;
+  if (hidden > 0 && height > agentsBody + 1) {
+    rows[height - 2] = { segments: [{ text: ` … ${hidden} more`, color: theme.brand, bold: true }] };
   }
   // Collapse toggle in the bottom-right corner.
   if (height > 0) {

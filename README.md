@@ -55,7 +55,7 @@ Implemented:
 - named daemon sessions with list, attach, and delete commands
 - Git worktree list/create/open/remove automation
 - agent detection for 23 agents, with reported or inferred status evidence and explicit uncertainty
-- an Agent desk with an attention queue, task context, checkout changes, and live output inspection
+- a sidebar agent panel grouped by space or by attention status, with persistent task context
 - persistent task summaries, blockers, next actions, check results, and explicit review acknowledgement
 - Claude lifecycle hooks that capture prompts, permission requests, and response summaries
 - agent get/read/wait/prompt automation
@@ -149,7 +149,7 @@ Ctrl+B N      new workspace
 Ctrl+B W      rename workspace
 Ctrl+B w      workspace picker
 Ctrl+B g      search workspaces and panes
-Ctrl+B d      Agent desk
+Ctrl+B d      toggle agent grouping (spaces/status)
 Ctrl+B [      copy mode
 Ctrl+B v      split right
 Ctrl+B -      split down
@@ -174,32 +174,18 @@ In terminal mode, unbound keys—including Ctrl+C—are forwarded to the focused
 
 ## Supervising agents
 
-Open the **Agent desk** with `Ctrl+B d`, the global menu, or a click on the
-agent summary. Its default attention queue includes blockers, failed checks,
-pending reviews, and uncertain status across local and saved remote machines.
-Disconnected machines retain visibly cached context. Oldest attention comes
-first; selection stays on the same agent when priorities change.
-
-| Desk control | Action |
-| --- | --- |
-| `1` / `2` | Attention / all agents |
-| `3`…`7` | Blocked / review / uncertain / working / ready |
-| `/` | Search tasks, agents, workspaces, branches, or paths |
-| `↑↓`, `j/k`, Home/End | Select an agent |
-| Tab | Switch list/detail focus; reveal details on narrow terminals |
-| Page Up/Down | Page the list or scroll focused details |
-| `v` | Cycle brief, full context, changed files, output, and activity |
-| Enter | Open the local terminal or remote workspace |
-| `t` | Edit the task; Tab changes fields, Ctrl+S saves |
-| `p` | Send a new instruction to an idle agent |
-| `r` | Acknowledge a pending review |
-| `0` / Esc | Reset filters / return |
+Toggle the sidebar agent panel between workspaces (`spaces`) and attention
+status (`status`) with `Ctrl+B d`, the global menu, or a click on the agent
+summary or the grouping label. The status view groups agents under
+NEEDS YOU, REVIEW, CHECK STATUS, WORKING, and READY headers, covering
+blockers, failed checks, pending reviews, and uncertain status. Oldest
+attention comes first within each group.
 
 Task context is saved immediately and survives reconnects and daemon restarts.
 Viewing a terminal does **not** acknowledge its task review. Reported checks
 are separate from review: acknowledging a result never implies tests passed.
 Changed files describe the pane's current checkout, which may be shared with
-other agents. The desk shows up to 200 files and reports the total.
+other agents (`shepherd task changes` shows up to 200 files and reports the total).
 
 ```bash
 shepherd task update p2 --title "Fix retry handling"
@@ -218,7 +204,7 @@ are rejected with a message to reopen the task.
 
 ### Status you can inspect
 
-The desk distinguishes integration reports, screen inference, and unknown
+Status distinguishes integration reports, screen inference, and unknown
 status. Unmatched screens and ordinary prose containing “finished” do not
 prove an agent is idle. Integration reports have a two-minute lease by
 default; newer visible activity can supersede an older report. The API retains
@@ -254,18 +240,11 @@ machines to this version for task editing and guarded prompt delivery.
 ### Returning to work
 
 Detaching preserves the running processes. A daemon restart can recreate
-commands or request an agent session resume; the desk labels these cases so
+commands or request an agent session resume; resumed panes are marked so
 they can be verified. Exited agent/task panes retain their output for review
 until explicitly closed. Completed commands are not rerun on restoration;
 their task context is restored beside a new shell. Terminal history across
 daemon restarts still requires `experimental.pane_history`.
-
-To inspect a simulated 50-agent layout without launching agents:
-
-```bash
-npm run preview-agent-desk -- --columns 120 --rows 30
-npm run preview-agent-desk -- --columns 60 --rows 24 --theme shepherd-day
-```
 
 ## Automation API
 
