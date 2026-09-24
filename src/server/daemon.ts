@@ -1984,8 +1984,8 @@ export class ShepherdDaemon {
     }
   }
 
-  /** A pane whose process exits is removed; the last pane closes its tab and
-   * the last tab closes its workspace. */
+  /** Exited command-backed tasks stay available for review. Other panes are
+   * removed; the last pane closes its tab and the last tab its workspace. */
   private handlePaneExit(paneId: string): void {
     if (this.stopping || !this.panes.has(paneId)) return;
     void this.emitEvent("pane.exited", { paneId, exitCode: this.requirePane(paneId).exitCode });
