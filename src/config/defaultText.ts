@@ -155,7 +155,7 @@ ${keyLines()}
 # {workspace}, {tab}, {pane}, and {terminal_title}. Set to "" to leave it alone.
 # window_title = ${toml(d.ui.window_title)}
 
-# Agent panel ordering: "spaces" (grouped by space) or "priority" (attention queue).
+# Agent panel ordering: "spaces" (grouped by space) or "status" (grouped by status).
 # "workspaces" is accepted as an alias for "spaces".
 # agent_panel_sort = ${toml(d.ui.agent_panel_sort)}
 

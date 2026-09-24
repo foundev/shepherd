@@ -78,7 +78,7 @@ const HELP_GROUPS: Array<{ title: string; actions: Action[] }> = [
       "reload_config",
       "open_notification_target",
       "goto",
-      "agent_desk",
+      "toggle_agent_sort",
       "toggle_sidebar",
     ],
   },

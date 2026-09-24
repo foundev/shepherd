@@ -831,7 +831,7 @@ worktree
   });
 
 const agent = program.command("agent").description("agent inspection");
-const task = program.command("task").description("persistent task context for the agent desk");
+const task = program.command("task").description("persistent task context for agents");
 task.command("get <paneId>").action(async (paneId: string, _options: unknown, command: Command) => {
   process.stdout.write(`${JSON.stringify(await requestOnce(sessionFor(command), { type: "task.get", paneId }), null, 2)}\n`);
 });

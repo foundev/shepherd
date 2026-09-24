@@ -2,8 +2,7 @@ import type { PaneView, StateView, WorkspaceView } from "./types.js";
 import { paneIds } from "./server/layout.js";
 
 export type DeskLane = "blocked" | "review" | "unknown" | "working" | "ready";
-export type DeskFilter = "attention" | "all" | DeskLane;
-export const DESK_FILTERS: DeskFilter[] = ["attention", "all", "blocked", "review", "unknown", "working", "ready"];
+export const LANE_ORDER: DeskLane[] = ["blocked", "review", "unknown", "working", "ready"];
 export const LANE_LABELS: Record<DeskLane, string> = {
   blocked: "NEEDS YOU", review: "REVIEW", unknown: "CHECK STATUS", working: "WORKING", ready: "READY",
 };
@@ -29,6 +28,12 @@ export function deskLane(pane: PaneView, online = true): DeskLane {
   return pane.status === "working" ? "working" : "ready";
 }
 
+export function attentionSince(pane: PaneView, lane = deskLane(pane)): number {
+  return lane === "review"
+    ? pane.task?.reviewRequestedAt ?? pane.signal?.changedAt ?? pane.signal?.observedAt ?? 0
+    : pane.signal?.changedAt ?? pane.signal?.observedAt ?? (Date.parse(pane.updatedAt) || 0);
+}
+
 /** One pass per machine; stable IDs keep selection on the same agent as priorities change. */
 export function deskEntries(state: StateView): DeskEntry[] {
   const result: DeskEntry[] = [];
@@ -44,8 +49,7 @@ export function deskEntries(state: StateView): DeskEntry[] {
         workspace: location?.workspace, tabLabel: location?.tabLabel ?? "",
         workspaceLabel: location?.workspace.label || location?.workspace.name || location?.workspace.rootPath.split("/").pop() || "Workspace",
         machineId, machineLabel, online, lane: deskLane(pane, online),
-        since: deskLane(pane, online) === "review" ? pane.task?.reviewRequestedAt ?? pane.signal?.changedAt ?? pane.signal?.observedAt ?? 0
-          : pane.signal?.changedAt ?? pane.signal?.observedAt ?? (Date.parse(pane.updatedAt) || 0),
+        since: attentionSince(pane, deskLane(pane, online)),
       });
     }
   };
@@ -56,23 +60,5 @@ export function deskEntries(state: StateView): DeskEntry[] {
       cwd: pane.cwd ?? "", updatedAt: pane.updatedAt ?? machine.checkedAt ?? "" })), machine.remote.workspaceList,
     machine.id, machine.label, machine.status === "online" && machine.reachable);
   }
-  const order: DeskLane[] = ["blocked", "review", "unknown", "working", "ready"];
-  return result.sort((a, b) => order.indexOf(a.lane) - order.indexOf(b.lane) || a.since - b.since || a.key.localeCompare(b.key, undefined, { numeric: true }));
-}
-
-export function filterDesk(entries: DeskEntry[], filter: DeskFilter, query: string): DeskEntry[] {
-  const words = query.toLowerCase().trim().split(/\s+/).filter(Boolean);
-  return entries.filter(entry => {
-    if (filter === "attention" ? ["working", "ready"].includes(entry.lane) : filter !== "all" && entry.lane !== filter) return false;
-    const { pane } = entry;
-    const text = [pane.id, pane.agent, pane.title, pane.cwd, pane.task?.title, pane.task?.summary, pane.task?.blocker,
-      pane.task?.nextAction, entry.workspaceLabel, entry.workspace?.git?.branch, entry.machineLabel, entry.tabLabel].join(" ").toLowerCase();
-    return words.every(word => text.includes(word));
-  });
-}
-
-export function ageLabel(at: number, now: number): string {
-  if (!at) return "";
-  const seconds = Math.max(0, Math.floor((now - at) / 1000));
-  return seconds < 60 ? `${seconds}s` : seconds < 3600 ? `${Math.floor(seconds / 60)}m` : `${Math.floor(seconds / 3600)}h`;
+  return result.sort((a, b) => LANE_ORDER.indexOf(a.lane) - LANE_ORDER.indexOf(b.lane) || a.since - b.since || a.key.localeCompare(b.key, undefined, { numeric: true }));
 }

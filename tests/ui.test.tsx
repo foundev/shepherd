@@ -6,20 +6,47 @@ import { defaultLoadedConfig } from "../src/config/model.js";
 import type { ShepherdRequest, StateView } from "../src/types.js";
 
 describe("Shepherd UI", () => {
-  it("opens the agent desk with its shortcut and keeps its input out of the PTY", async () => {
+  it("pages and scrolls overflow agents without sending wheel input to a pane", async () => {
+    const state = { ...testState(), machines: [] };
+    const workspace = state.workspaces[0]!;
+    for (let i = 3; i < 18; i += 1) {
+      state.panes.push({ ...state.panes[1]!, id: `p${i}`, displayAgent: `agent-${i}` });
+      workspace.tabs.push({ id: `t${i}`, name: `Agent ${i}`, layout: { kind: "pane", paneId: `p${i}` } });
+    }
+    const connection = new FakeConnection(state);
+    const instance = render(<App connection={connection} />);
+    try {
+      await flushApp();
+      const lines = (instance.lastFrame() ?? "").split("\n");
+      const row = lines.findIndex((line) => line.includes("next ↓"));
+      const column = lines[row]!.indexOf("next ↓") + 1;
+      expect(row).toBeGreaterThan(0);
+      instance.stdin.write(`\x1b[<0;${column};${row + 1}M`);
+      instance.stdin.write(`\x1b[<0;${column};${row + 1}m`);
+      await flushApp();
+      const paged = instance.lastFrame();
+      expect(paged).toContain("↑ prev");
+      expect(paged).not.toBe(lines.join("\n"));
+      instance.stdin.write(`\x1b[<65;4;${row}M`);
+      await flushApp();
+      expect(instance.lastFrame()).not.toBe(paged);
+      expect(connection.requests.some((request) => request.type === "surface.scroll" || request.type === "pane.mouse")).toBe(false);
+    } finally { instance.unmount(); }
+  });
+
+  it("toggles the sidebar agent grouping with its shortcut", async () => {
     const connection = new FakeConnection({ ...testState(), machines: [] });
     const instance = render(<App connection={connection} />);
     try {
       await flushApp();
+      expect(instance.lastFrame()).toMatch(/ AGENTS 1 +status/);
+      expect(instance.lastFrame()).toContain("× NEEDS YOU");
       instance.stdin.write("\x02d"); await flushApp();
-      expect(instance.lastFrame()).toContain("AGENT DESK");
-      const before = connection.requests.filter(r => r.type === "pane.input" || r.type === "pane.paste").length;
-      instance.stdin.write("/hello"); await flushApp();
-      instance.stdin.write("\x1b[200~ pasted query\x1b[201~"); await flushApp();
-      expect(connection.requests.filter(r => r.type === "pane.input" || r.type === "pane.paste")).toHaveLength(before);
-      instance.stdin.write("\x1b"); await flushApp();
-      instance.stdin.write("\x1b"); await flushApp();
-      expect(instance.lastFrame()).not.toContain("AGENT DESK");
+      const grouped = instance.lastFrame() ?? "";
+      expect(grouped).toMatch(/ AGENTS 1 +spaces/);
+      expect(grouped).not.toContain("× NEEDS YOU");
+      instance.stdin.write("\x02d"); await flushApp();
+      expect(instance.lastFrame()).toContain("× NEEDS YOU");
     } finally { instance.unmount(); }
   });
   it("renders the real workspace, agent deck, and terminal surface", async () => {

@@ -7,7 +7,7 @@ import { ClientConnection } from "../src/client/connection.js";
 import { connect } from "../src/transport.js";
 import type { AgentTask, StateView } from "../src/types.js";
 
-describe("agent desk lifecycle", () => {
+describe("agent task lifecycle", () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "shepherd-desk-"));
   const socketPath = path.join(root, "d.sock");
   const env = { ...process.env };

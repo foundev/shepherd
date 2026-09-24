@@ -14,8 +14,7 @@
     "start": "node bin/shepherd",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run",
-    "bench-render-scale": "tsx scripts/bench-render-scale.tsx",
-    "preview-agent-desk": "tsx scripts/preview-agent-desk.tsx"
+    "bench-render-scale": "tsx scripts/bench-render-scale.tsx"
   },
   "engines": {
     "node": ">=22"
