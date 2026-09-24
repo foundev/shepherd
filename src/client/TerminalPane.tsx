@@ -1,6 +1,7 @@
 import { memo } from "react";
 import { Box, Text } from "ink";
 import { statusColor, theme } from "./theme.js";
+import { terminalColor } from "./colors.js";
 import { displayWidth, type BorderCell, type PaneFrame } from "./geometry.js";
 import { statusIcon, truncateText } from "./chrome.js";
 import {
@@ -208,8 +209,8 @@ const TerminalRow = memo(function TerminalRow({
       {clipped.map((span, index) => (
         <Text
           key={index}
-          color={span.color}
-          backgroundColor={span.backgroundColor}
+          color={terminalColor(span.color)}
+          backgroundColor={terminalColor(span.backgroundColor)}
           bold={span.bold}
           italic={span.italic}
           dimColor={span.dimColor}

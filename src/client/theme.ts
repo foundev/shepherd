@@ -1,4 +1,5 @@
 import { PALETTES, type ThemePalette } from "./palettes.js";
+import { terminalColor } from "./colors.js";
 
 const initial = PALETTES.shepherd!;
 
@@ -125,6 +126,11 @@ export function applyTheme(
       continue;
     }
     palette[key as keyof ThemePalette] = parsed;
+  }
+
+  for (const key of Object.keys(palette) as Array<keyof ThemePalette>) {
+    const value = palette[key];
+    if (value !== null) palette[key] = terminalColor(value)!;
   }
 
   const color = (value: string | null, fallback: string) => value ?? fallback;
