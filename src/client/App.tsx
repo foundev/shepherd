@@ -211,6 +211,7 @@ export function App({
     { machineId: string; workspaceId: string } | null
   >(null);
   const [agentSort, setAgentSort] = useState<"spaces" | "status">(config.ui.agent_panel_sort);
+  const [agentScroll, setAgentScroll] = useState<number>();
   const sidebarDrag = useRef(false);
   /** Tab or workspace being dragged to a new position. */
   const reorderDrag = useRef<{
@@ -530,6 +531,7 @@ export function App({
     if (windowTitle) writeHost(stdout, `\x1b]2;${windowTitle}\x07`);
   }, [stdout, windowTitle]);
 
+  useEffect(() => setAgentScroll(undefined), [state?.focusedPaneId, agentSort]);
   const sidebarModel = useMemo(() => state
     ? sidebarRows(state, {
       width: screen.sidebar.width,
@@ -538,6 +540,7 @@ export function App({
       activeWorkspaceId: state.activeWorkspaceId,
       indicators: config.ui.status_indicators,
       sort: agentSort,
+      agentScroll,
       mouse: config.ui.mouse_capture,
       navigateWorkspaceId: mode === "navigate"
         ? state.workspaces[navigateIndex]?.id ?? null
@@ -550,6 +553,7 @@ export function App({
     })
     : [], [
       agentSort,
+      agentScroll,
       collapsedGroups,
       collapsedMachines,
       config.ui,
@@ -1285,6 +1289,9 @@ export function App({
       case "agent-sort":
         setAgentSort((current) => current === "status" ? "spaces" : "status");
         return;
+      case "agent-scroll":
+        setAgentScroll(target.offset);
+        return;
       case "sidebar-toggle":
         setSidebarCollapsed((collapsed) => !collapsed);
         return;
@@ -1424,6 +1431,12 @@ export function App({
     }
 
     if (event.action === "wheel") {
+      const agentViewport = x < screen.sidebar.width - 1 ? sidebarModel[y]?.agentScroll : undefined;
+      if (agentViewport) {
+        const step = (event.direction === "up" ? -1 : 1) * config.ui.mouse_scroll_lines;
+        setAgentScroll(Math.max(0, Math.min(agentViewport.maxOffset, agentViewport.offset + step)));
+        return;
+      }
       if (!target) return;
       const cell = contentCell(target, x, y, chromeFor(target.paneId));
       if (appTracksMouse && !event.shift && cell.inside) {

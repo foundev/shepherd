@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { deskEntries } from "../src/agentDesk.js";
-import { agentEntries, normalizeAgentSort, sidebarRows } from "../src/client/chrome.js";
+import { agentEntries, normalizeAgentSort, sidebarRows, type SidebarOptions } from "../src/client/chrome.js";
+import { displayWidth } from "../src/client/geometry.js";
 import { parseConfig } from "../src/config/model.js";
 import { updateTask } from "../src/server/tasks.js";
 import type { StateView } from "../src/types.js";
@@ -54,6 +55,64 @@ describe("agent attention lanes", () => {
 });
 
 describe("sidebar agent grouping", () => {
+  it("keeps the oldest attention first despite recent output or status updates", () => {
+    const state = fleetState(10);
+    state.panes[0]!.signal!.changedAt = 2000;
+    state.panes[5]!.signal!.changedAt = 500;
+    state.panes[5]!.updatedAt = "2026-09-24T12:00:00Z";
+    state.panes[6]!.task!.reviewRequestedAt = 400;
+    state.panes[6]!.updatedAt = "2026-09-24T12:00:00Z";
+    expect(agentEntries(state, "status").map((entry) => entry.pane.id))
+      .toEqual(deskEntries(state).map((entry) => entry.pane.id));
+    expect(agentEntries(state, "status").slice(0, 4).map((entry) => entry.pane.id))
+      .toEqual(["p5", "p0", "p6", "p1"]);
+  });
+
+  it("includes task panes without a detected agent", () => {
+    const state = fleetState(1);
+    state.panes[0]!.agent = null;
+    expect(agentEntries(state, "status").map((entry) => entry.pane.id)).toEqual(["p0"]);
+    expect(rowTexts(state, "status").some((line) => line.includes("NEEDS YOU"))).toBe(true);
+  });
+
+  it("preserves an explicit agent view sort in rendered rows", () => {
+    const state = fleetState(5);
+    state.agentView = { source: "fixture", label: "Custom", filter: null, sort: [{ field: "pane_order", order: "desc" }, { field: "tab_order", order: "desc" }] };
+    const rows = sidebarRows(state, {
+      width: 40, height: 60, focusedPaneId: "p0", activeWorkspaceId: "w0",
+      indicators: "symbols", sort: "status", mouse: true, navigateWorkspaceId: null, compact: false,
+    });
+    const rendered = [...new Set(rows.flatMap((row) => row.target?.kind === "agent" ? [row.target.paneId] : []))];
+    expect(rendered).toEqual(["p4", "p3", "p2", "p1", "p0"]);
+    expect(rows.some((row) => row.segments.some((segment) => segment.text.includes("NEEDS YOU")))).toBe(false);
+  });
+
+  it.each(["spaces", "status"] as const)("pages through every agent in a bounded %s viewport", (sort) => {
+    const state = fleetState();
+    const options: SidebarOptions = {
+      width: 26, height: 24, focusedPaneId: "p0", activeWorkspaceId: "w0",
+      indicators: "symbols", sort, mouse: true, navigateWorkspaceId: null, compact: false,
+    };
+    const seen = new Set<string>();
+    let offset = 0;
+    for (let page = 0; page < 100; page += 1) {
+      const rows = sidebarRows(state, { ...options, agentScroll: offset });
+      expect(rows).toHaveLength(24);
+      expect(rows.every((row) => displayWidth(row.segments.map((segment) => segment.text).join("")) <= 25)).toBe(true);
+      for (const row of rows) if (row.target?.kind === "agent") seen.add(row.target.paneId);
+      const next = rows.flatMap((row) => row.segments).find((segment) =>
+        segment.target?.kind === "agent-scroll" && segment.target.offset > offset)?.target;
+      if (next?.kind !== "agent-scroll") break;
+      offset = next.offset;
+    }
+    expect(seen.size).toBe(50);
+    const last = sidebarRows(state, { ...options, agentScroll: offset });
+    expect(last.flatMap((row) => row.segments).some((segment) =>
+      segment.target?.kind === "agent-scroll" && segment.target.offset < offset)).toBe(true);
+    const focused = sidebarRows(state, { ...options, focusedPaneId: "p49" });
+    expect(focused.some((row) => row.target?.kind === "agent" && row.target.paneId === "p49")).toBe(true);
+  });
+
   it("groups agents under status headers in lane order", () => {
     const lines = rowTexts(fleetState(5), "status");
     const headers = ["NEEDS YOU", "REVIEW", "CHECK STATUS", "WORKING", "READY"]

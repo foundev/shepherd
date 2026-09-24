@@ -2,7 +2,7 @@
  * Rendering and mouse hit-testing both use these models. */
 import { paneIds } from "../server/layout.js";
 import { applyAgentView } from "../agentView.js";
-import { deskEntries, deskLane, LANE_LABELS, LANE_ORDER, type DeskLane } from "../agentDesk.js";
+import { attentionSince, deskEntries, deskLane, LANE_LABELS, LANE_ORDER, type DeskLane } from "../agentDesk.js";
 import { defaultSidebarConfig, type SidebarConfig } from "../config/sidebar.js";
 import type {
   AgentStatus,
@@ -29,6 +29,7 @@ export type ClickTarget =
   | { kind: "new-workspace" }
   | { kind: "menu" }
   | { kind: "agent-sort" }
+  | { kind: "agent-scroll"; offset: number }
   | { kind: "sidebar-toggle" }
   | { kind: "tab"; id: string }
   | { kind: "new-tab" }
@@ -62,6 +63,8 @@ export interface ChromeRow {
   background?: string;
   /** Clicking anywhere on the row not covered by a segment target. */
   target?: ClickTarget;
+  /** Agent viewport bounds used by sidebar wheel input. */
+  agentScroll?: { offset: number; maxOffset: number };
 }
 
 const STATUS_PRIORITY: AgentStatus[] = ["blocked", "done", "unknown", "working", "idle"];
@@ -150,7 +153,7 @@ export function agentEntries(
       paneIds(tab.layout).forEach((paneId, index) => {
         paneOrder.set(paneId, index + 1);
         const pane = state.panes.find((entry) => entry.id === paneId);
-        if (pane?.agent) entries.push({ pane, workspace, workspaceIndex, tab, tabIndex });
+        if (pane && (pane.agent || pane.task)) entries.push({ pane, workspace, workspaceIndex, tab, tabIndex });
       });
     });
   });
@@ -179,7 +182,8 @@ export function agentEntries(
   if (normalizeAgentSort(sort) === "status") {
     entries.sort((left, right) =>
       LANE_ORDER.indexOf(deskLane(left.pane)) - LANE_ORDER.indexOf(deskLane(right.pane)) ||
-      left.pane.updatedAt.localeCompare(right.pane.updatedAt)
+      attentionSince(left.pane) - attentionSince(right.pane) ||
+      left.pane.id.localeCompare(right.pane.id, undefined, { numeric: true })
     );
   }
   return entries;
@@ -245,6 +249,8 @@ export interface SidebarOptions {
   activeWorkspaceId: string;
   indicators: "dots" | "symbols";
   sort: AgentSort | "priority";
+  /** First agent row shown; defaults to revealing the focused pane. */
+  agentScroll?: number;
   mouse: boolean;
   /** Workspace highlighted in navigate mode. */
   navigateWorkspaceId: string | null;
@@ -600,11 +606,11 @@ function expandedRows(state: StateView, options: SidebarOptions): ChromeRow[] {
     rows[agentsTop] = { segments: [{ text: "─".repeat(width), color: theme.surfaceDim }] };
   }
   const agents = agentEntries(state, options.sort);
-  const grouped = normalizeAgentSort(options.sort) === "status";
+  const grouped = normalizeAgentSort(options.sort) === "status" && !state.agentView?.sort.length;
   if (agentsTop + 1 < height) {
     rows[agentsTop + 1] = {
       segments: rightAligned(
-        [{ text: ` AGENTS ${agents.length}`, color: theme.subtext, bold: true }],
+        [{ text: ` AGENTS ${agents.length}`, color: theme.subtext, bold: true, target: { kind: "agent-sort" } }],
         [state.agentView
           ? { text: state.agentView.label ?? "view", color: theme.brand, bold: true }
           : {
@@ -684,13 +690,25 @@ function expandedRows(state: StateView, options: SidebarOptions): ChromeRow[] {
   }
   const agentsBody = agentsTop + 3;
   const visibleCapacity = Math.max(0, height - 1 - agentsBody);
-  for (let index = 0; index < visibleCapacity; index += 1) {
-    const row = agentRows[index];
+  const overflowing = agentRows.length > visibleCapacity && visibleCapacity > 1;
+  const capacity = overflowing ? visibleCapacity - 1 : visibleCapacity;
+  const maxOffset = Math.max(0, agentRows.length - capacity);
+  const focusedRow = agentRows.findIndex((row) => row.target?.kind === "agent" && row.target.paneId === options.focusedPaneId);
+  const initialOffset = focusedRow >= capacity ? focusedRow : 0;
+  const agentOffset = Math.max(0, Math.min(maxOffset, options.agentScroll ?? initialOffset));
+  for (let index = 0; index < capacity; index += 1) {
+    const row = agentRows[agentOffset + index];
     if (row) rows[agentsBody + index] = row;
   }
-  const hidden = agentRows.length - visibleCapacity;
-  if (hidden > 0 && height > agentsBody + 1) {
-    rows[height - 2] = { segments: [{ text: ` … ${hidden} more`, color: theme.brand, bold: true }] };
+  if (overflowing) {
+    rows[height - 2] = { segments: rightAligned(
+      agentOffset > 0 ? [{ text: " ↑ prev", color: theme.brand, target: { kind: "agent-scroll", offset: Math.max(0, agentOffset - capacity) } }] : [],
+      agentOffset < maxOffset ? [{ text: "next ↓ ", color: theme.brand, target: { kind: "agent-scroll", offset: Math.min(maxOffset, agentOffset + capacity) } }] : [],
+      width,
+    ) };
+  }
+  for (let index = agentsTop + 1; index < height - 1; index += 1) {
+    rows[index]!.agentScroll = { offset: agentOffset, maxOffset };
   }
   // Collapse toggle in the bottom-right corner.
   if (height > 0) {

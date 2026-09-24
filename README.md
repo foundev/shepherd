@@ -180,6 +180,8 @@ summary or the grouping label. The status view groups agents under
 NEEDS YOU, REVIEW, CHECK STATUS, WORKING, and READY headers, covering
 blockers, failed checks, pending reviews, and uncertain status. Oldest
 attention comes first within each group.
+Scroll the panel or click its previous/next controls to reach overflow agents.
+An explicit `agent.view.set` sort takes precedence over status grouping.
 
 Task context is saved immediately and survives reconnects and daemon restarts.
 Viewing a terminal does **not** acknowledge its task review. Reported checks

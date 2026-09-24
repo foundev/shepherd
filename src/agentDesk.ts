@@ -28,6 +28,12 @@ export function deskLane(pane: PaneView, online = true): DeskLane {
   return pane.status === "working" ? "working" : "ready";
 }
 
+export function attentionSince(pane: PaneView, lane = deskLane(pane)): number {
+  return lane === "review"
+    ? pane.task?.reviewRequestedAt ?? pane.signal?.changedAt ?? pane.signal?.observedAt ?? 0
+    : pane.signal?.changedAt ?? pane.signal?.observedAt ?? (Date.parse(pane.updatedAt) || 0);
+}
+
 /** One pass per machine; stable IDs keep selection on the same agent as priorities change. */
 export function deskEntries(state: StateView): DeskEntry[] {
   const result: DeskEntry[] = [];
@@ -43,8 +49,7 @@ export function deskEntries(state: StateView): DeskEntry[] {
         workspace: location?.workspace, tabLabel: location?.tabLabel ?? "",
         workspaceLabel: location?.workspace.label || location?.workspace.name || location?.workspace.rootPath.split("/").pop() || "Workspace",
         machineId, machineLabel, online, lane: deskLane(pane, online),
-        since: deskLane(pane, online) === "review" ? pane.task?.reviewRequestedAt ?? pane.signal?.changedAt ?? pane.signal?.observedAt ?? 0
-          : pane.signal?.changedAt ?? pane.signal?.observedAt ?? (Date.parse(pane.updatedAt) || 0),
+        since: attentionSince(pane, deskLane(pane, online)),
       });
     }
   };
