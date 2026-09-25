@@ -34,7 +34,7 @@ export const theme = {
   sidebarBg: initial.sidebar_bg ?? undefined,
 };
 
-/** Shepherd's agent status colours: blocked coral, working amber, review blue,
+/** Shepherd's agent status colours: blocked coral, working amber, review teal,
  * idle green. */
 export const statusColor: Record<string, string> = {};
 export const statusBackground: Record<string, string> = {};

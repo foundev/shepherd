@@ -23,14 +23,12 @@ export function centeredRect(
   };
 }
 
-/** A floating panel in Shepherd's style: rounded border in the accent colour,
- * an optional title set into the top edge, panel background. Children are
- * the inner rows. */
+/** A floating surface with quiet boundaries and a continuous title row. */
 export function Panel({
   rect,
   title,
   children,
-  borderColor = theme.brand,
+  borderColor = theme.border,
 }: {
   rect: Rect;
   title?: string;
@@ -38,7 +36,7 @@ export function Panel({
   borderColor?: string;
 }) {
   const inner = Math.max(0, rect.width - 2);
-  const label = title && inner >= 3 ? ` ${truncateText(title, inner - 3)} ` : "";
+  const label = title && inner >= 3 ? ` ${truncateText(title, inner - 2)} ` : "";
   return (
     <Box
       position="absolute"
@@ -49,10 +47,10 @@ export function Panel({
       flexDirection="column"
       overflow="hidden"
     >
-      <Text color={borderColor} backgroundColor={theme.panelBg} wrap="truncate-end">
-        {"╭─"}
-        {label && <Text color={theme.panelContrast} backgroundColor={borderColor} bold>{label}</Text>}
-        {`${"─".repeat(Math.max(0, inner - 1 - displayWidth(label)))}╮`}
+      <Text color={borderColor} backgroundColor={label ? theme.surfaceRaised : theme.panelBg} wrap="truncate-end">
+        {"╭"}
+        {label && <Text color={theme.text} backgroundColor={theme.surfaceRaised} bold>{label}</Text>}
+        {`${(label ? " " : "─").repeat(Math.max(0, inner - displayWidth(label)))}╮`}
       </Text>
       <Box flexDirection="row" height={rect.height - 2}>
         <Box flexDirection="column" width={1}>
@@ -129,8 +127,8 @@ export function MenuOverlay({
         return (
           <Box key={index} width={inner} height={1} flexShrink={0} backgroundColor={selected ? theme.activeRow : theme.panelBg}>
             <Text color={selected ? theme.brand : theme.muted}>{selected ? "▸ " : "  "}</Text>
-            {item.badge && <Text color={theme.brand}>● </Text>}
-            <Text color={selected ? theme.brand : theme.text} bold={selected} wrap="truncate-end">{item.label}</Text>
+            {item.badge && <Text color={theme.warning}>● </Text>}
+            <Text color={theme.text} bold={selected} wrap="truncate-end">{item.label}</Text>
           </Box>
         );
       })}

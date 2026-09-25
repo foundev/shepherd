@@ -26,6 +26,7 @@ export const ChromeLine = memo(function ChromeLine({
           color={segment.color}
           backgroundColor={segment.backgroundColor ?? row.background}
           bold={segment.bold}
+          underline={segment.underline}
           dimColor={segment.dim}
         >
           {segment.animate ? <AnimatedIndicator text={segment.text} /> : segment.text}
@@ -47,15 +48,25 @@ export function Sidebar({
   width: number;
 }) {
   if (width <= 0) return null;
+  const blocks: ChromeRow[][] = [];
+  for (const row of rows) {
+    const previous = blocks[blocks.length - 1];
+    if (row.block && previous?.[0]?.block === row.block) previous.push(row);
+    else blocks.push([row]);
+  }
   return (
     <Box flexDirection="column" width={width} height={rows.length} overflow="hidden" backgroundColor={theme.sidebarBg}>
-      {rows.map((row, index) => (
-        <ChromeLine
-          key={index}
-          row={row}
-          width={width - 1}
-          trailing={{ text: "│", color: theme.border }}
-        />
+      {blocks.map((block, index) => (
+        <Box key={index} flexDirection="column" width={width} flexShrink={0} backgroundColor={block[0]?.background}>
+          {block.map((row, rowIndex) => (
+            <ChromeLine
+              key={rowIndex}
+              row={row}
+              width={width - 1}
+              trailing={{ text: "│", color: theme.border }}
+            />
+          ))}
+        </Box>
       ))}
     </Box>
   );

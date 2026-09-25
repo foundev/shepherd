@@ -3,11 +3,11 @@ import { Text } from "ink";
 import type { AgentStatus } from "../types.js";
 import type { Segment } from "./chrome.js";
 import { displayWidth } from "./geometry.js";
-import { statusBackground, statusColor, statusForeground } from "./theme.js";
+import { statusColor, statusForeground } from "./theme.js";
 
 const WORKING_FRAMES = ["◐", "◓", "◑", "◒"];
 const GLYPHS: Record<AgentStatus, string> = {
-  blocked: "×", working: "◐", done: "✓", idle: "○", unknown: "·",
+  blocked: "×", working: "◐", done: "◇", idle: "○", unknown: "·",
 };
 
 let activityFrame = 0;
@@ -50,8 +50,8 @@ export function statusBadgeSegments(status: AgentStatus, options: BadgeOptions =
   const label = options.label ?? (status === "done" ? "REVIEW" : status.toUpperCase());
   const icon: Segment = {
     text: ` ${glyph}${compact ? " " : ""}`,
-    color: statusForeground[status],
-    backgroundColor: statusColor[status],
+    color: solid ? statusForeground[status] : statusColor[status],
+    backgroundColor: solid ? statusColor[status] : undefined,
     bold: true,
     animate: animate && status === "working",
   };
@@ -59,7 +59,7 @@ export function statusBadgeSegments(status: AgentStatus, options: BadgeOptions =
   return [icon, {
     text: ` ${label} `,
     color: solid ? statusForeground[status] : statusColor[status],
-    backgroundColor: solid ? statusColor[status] : statusBackground[status],
+    backgroundColor: solid ? statusColor[status] : undefined,
     bold: true,
   }];
 }
@@ -74,7 +74,7 @@ export function AnimatedIndicator({ text }: { text: string }) {
   return <>{text.replace(/[◐◓◑◒]/u, WORKING_FRAMES[frame]!)}</>;
 }
 
-/** Native Ink status chip; text and shape remain meaningful without color. */
+/** Native Ink status marker; a solid fill is reserved for explicit emphasis. */
 export function StatusBadge({ status, ...options }: BadgeOptions & { status: AgentStatus }) {
   return <Text>{statusBadgeSegments(status, options).map((segment, index) => (
     <Text key={index} color={segment.color} backgroundColor={segment.backgroundColor} bold>

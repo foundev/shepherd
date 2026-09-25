@@ -82,17 +82,21 @@ Open work:
 
 ## Design direction
 
-Shepherd's native React and Ink interface uses deep navy surfaces, a mint
-accent, and distinct status chips: coral for blockers, amber for activity,
-sky blue for review, and green for ready agents. Filled pane titles and sidebar
-focus rails make the active terminal clear. A matching light theme is available
+Shepherd's native React and Ink interface puts tasks and decisions alongside
+your terminals. The sidebar shows each agent's task, location, and next action,
+with blockers first. A workspace header shows the current branch and attention
+counts across your workspaces; the footer keeps configured shortcuts visible.
+
+Graphite surfaces, lavender focus markers, and neutral pane titles establish
+the layout. Status indicators use coral for blockers, amber for activity,
+teal for review, and green for ready agents. A matching light theme is available
 in settings, with color swatches for all nine themes.
 
 ![Shepherd's native Ink interface with demonstration agents](docs/ui-preview.svg)
 
 Working indicators share one clock and update within small Ink components.
 Status labels and symbols remain readable without color, and narrow panes use
-compact badges. The same styling carries through menus, notifications, and the
+compact indicators. The same styling carries through menus, notifications, and the
 phone-width layout.
 
 Built-in themes are `shepherd`, `shepherd-day`, `aurora`, `ember`, `midnight`,

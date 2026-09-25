@@ -51,6 +51,31 @@ function draw(frames: Map<string, PaneFrame>, panes: ReturnType<typeof framePane
 }
 
 describe("phone-width screen layout", () => {
+  it("reserves the desktop workspace header and footer outside terminal cells", () => {
+    const options = { sidebarWidth: 32, sidebarState: "expanded" as const, workspaceChrome: true };
+    const top = screenLayout(140, 40, { ...options, tabBar: "top" });
+    expect(top.workspaceHeader).toEqual({ x: 32, y: 0, width: 108, height: 3 });
+    expect(top.tabBar).toEqual({ x: 32, y: 3, width: 108, height: 1 });
+    expect(top.main).toEqual({ x: 32, y: 4, width: 108, height: 35 });
+    expect(top.footer).toEqual({ x: 32, y: 39, width: 108, height: 1 });
+    expect(top.modeBar).toEqual(top.footer);
+    const bottom = screenLayout(140, 40, { ...options, tabBar: "bottom" });
+    expect(bottom.main).toEqual({ x: 32, y: 3, width: 108, height: 35 });
+    expect(bottom.tabBar?.y).toBe(38);
+    expect(bottom.footer?.y).toBe(39);
+    for (const compact of [
+      screenLayout(58, 40, { ...options, tabBar: "top", mobileThreshold: 64 }),
+      screenLayout(140, 12, { ...options, tabBar: "top" }),
+      screenLayout(140, 23, { ...options, tabBar: "top" }),
+      screenLayout(65, 30, { ...options, tabBar: "top" }),
+      screenLayout(140, 40, { ...options, tabBar: "none" }),
+    ]) {
+      expect(compact.workspaceHeader).toBeNull();
+      expect(compact.footer).toBeNull();
+    }
+    expect(screenLayout(65, 16, { ...options, tabBar: "top" }).main.height).toBe(15);
+  });
+
   it("puts a two-row header over full-width panes at or below the threshold", () => {
     const options = {
       sidebarWidth: 26,

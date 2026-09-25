@@ -11,15 +11,16 @@ export interface ScreenOptions {
   tabBar: "top" | "bottom" | "none";
   /** At or below this many columns the screen uses the phone layout. */
   mobileThreshold?: number;
+  /** Workspace context and shortcut footer on desktop-sized screens. */
+  workspaceChrome?: boolean;
 }
 
 /** Rows of the phone-width header above the panes. */
 export const MOBILE_HEADER_HEIGHT = 2;
 
 /** Absolute screen regions (0-based cells, as SGR mouse reports minus one).
- * Shepherd's layout: sidebar on the left at full height, a one-row tab bar
- * over the main area, and the pane surface below it. Mode bars paint over
- * the last row of the pane surface. */
+ * The sidebar spans the screen; workspace context, tabs, terminal surfaces,
+ * and shortcuts occupy separate rows. Compact layouts reclaim context rows. */
 export interface ScreenLayout {
   columns: number;
   rows: number;
@@ -31,6 +32,8 @@ export interface ScreenLayout {
   mobile: boolean;
   /** The phone-width header, when `mobile`. */
   header: Rect | null;
+  workspaceHeader: Rect | null;
+  footer: Rect | null;
 }
 
 export function screenLayout(
@@ -64,6 +67,8 @@ export function screenLayout(
       modeBar: { x: 0, y: safeRows - 1, width: safeColumns, height: 1 },
       mobile,
       header: { x: 0, y: 0, width: safeColumns, height: headerHeight },
+      workspaceHeader: null,
+      footer: null,
     };
   }
   const preferred = options.sidebarState === "hidden"
@@ -74,13 +79,16 @@ export function screenLayout(
   const sidebarWidth = Math.max(0, Math.min(safeColumns - 1, preferred));
   const mainX = sidebarWidth;
   const mainWidth = safeColumns - sidebarWidth;
+  const workspaceChrome = Boolean(options.workspaceChrome && options.tabBar !== "none" && safeRows >= 24 && mainWidth >= 46);
+  const headerHeight = workspaceChrome ? 3 : 0;
+  const footerHeight = workspaceChrome ? 1 : 0;
   const tabBarRow = options.tabBar === "none" || safeRows <= 1
     ? null
     : options.tabBar === "bottom"
-      ? safeRows - 1
-      : 0;
-  const surfaceY = tabBarRow === 0 ? 1 : 0;
-  const surfaceHeight = safeRows - (tabBarRow === null ? 0 : 1);
+      ? safeRows - footerHeight - 1
+      : headerHeight;
+  const surfaceY = headerHeight + (options.tabBar === "top" && tabBarRow !== null ? 1 : 0);
+  const surfaceHeight = safeRows - headerHeight - footerHeight - (tabBarRow === null ? 0 : 1);
   const main = { x: mainX, y: surfaceY, width: mainWidth, height: surfaceHeight };
   return {
     columns: safeColumns,
@@ -90,11 +98,15 @@ export function screenLayout(
       ? null
       : { x: mainX, y: tabBarRow, width: mainWidth, height: 1 },
     main,
-    modeBar: tabBarRow !== null && tabBarRow === safeRows - 1
+    modeBar: workspaceChrome
+      ? { x: mainX, y: safeRows - 1, width: mainWidth, height: 1 }
+      : tabBarRow !== null && tabBarRow === safeRows - 1
       ? { x: mainX, y: tabBarRow, width: mainWidth, height: 1 }
       : { x: mainX, y: main.y + main.height - 1, width: mainWidth, height: 1 },
     mobile,
     header: null,
+    workspaceHeader: workspaceChrome ? { x: mainX, y: 0, width: mainWidth, height: headerHeight } : null,
+    footer: workspaceChrome ? { x: mainX, y: safeRows - 1, width: mainWidth, height: footerHeight } : null,
   };
 }
 
