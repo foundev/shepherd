@@ -2,6 +2,7 @@ import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import { createRequire } from "node:module";
 import pty from "node-pty";
+import { ANSI_COLORS } from "../ansiColors.js";
 import type {
   AgentStatus,
   AgentTask,
@@ -632,7 +633,11 @@ export class PaneTerminal {
     const normal = this.terminal.buffer.normal;
     const cols = this.terminal.cols;
     let last = normal.length - 1;
-    while (last >= 0 && !normal.getLine(last)?.translateToString(true).trim()) last -= 1;
+    while (last >= 0) {
+      const line = normal.getLine(last);
+      if (line && styledLine(line, cols).length > 0) break;
+      last -= 1;
+    }
     if (last < 0) return null;
     let out = "";
     for (let index = Math.max(0, normal.length - 5_000); index <= last; index += 1) {
@@ -941,7 +946,10 @@ function styledLine(
 
   while (spans.length > 0) {
     const last = spans[spans.length - 1];
-    if (!last || last.text.trim().length !== 0) break;
+    // Spaces can paint backgrounds, selections, or rules. Trim only cells
+    // whose absence renders identically to the default empty pane.
+    if (!last || last.text.trim().length !== 0 || last.backgroundColor !== undefined ||
+      last.inverse || last.underline || last.strikethrough) break;
     spans.pop();
   }
   return spans;
@@ -960,8 +968,19 @@ function spanAnsi(span: TerminalSpan): string {
     const hex = value.replace("#", "");
     return [0, 2, 4].map((offset) => Number.parseInt(hex.slice(offset, offset + 2), 16)).join(";");
   };
-  if (span.color?.startsWith("#")) codes.push(`38;2;${rgb(span.color)}`);
-  if (span.backgroundColor?.startsWith("#")) codes.push(`48;2;${rgb(span.backgroundColor)}`);
+  const colorCode = (color: string | undefined, background: boolean) => {
+    if (!color) return;
+    if (color.startsWith("#")) {
+      codes.push(`${background ? 48 : 38};2;${rgb(color)}`);
+      return;
+    }
+    const index = ANSI_COLORS.indexOf(color);
+    if (index >= 0) {
+      codes.push(String((background ? 40 : 30) + (index < 8 ? index : index + 52)));
+    }
+  };
+  colorCode(span.color, false);
+  colorCode(span.backgroundColor, true);
   return `\x1b[${codes.join(";")}m${span.text}`;
 }
 
@@ -1008,12 +1027,7 @@ function paletteColor(value: number): string {
     return rgbColor((red << 16) | (green << 8) | blue);
   }
 
-  return [
-    "#000000", "#800000", "#008000", "#808000",
-    "#000080", "#800080", "#008080", "#c0c0c0",
-    "#808080", "#ff0000", "#00ff00", "#ffff00",
-    "#0000ff", "#ff00ff", "#00ffff", "#ffffff",
-  ][Math.max(0, Math.min(15, value))];
+  return ANSI_COLORS[Math.max(0, Math.min(15, value))]!;
 }
 
 export function unwrapTerminalLines(

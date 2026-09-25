@@ -5,21 +5,19 @@ import type { AgentStatus } from "../types.js";
 export type ToastKind = "needs attention" | "ready for review";
 export type SoundKind = "request" | "done";
 
-/** Shepherd's rules: blocked always asks for attention (with the request
- * sound); working/blocked → idle or done is a completion, skipped for the
- * tab the user is looking at while the terminal has focus. */
+/** Visible panes in a focused terminal need neither an alert nor a sound. */
 export function decideNotification(
   previous: AgentStatus | undefined,
   next: AgentStatus,
   suppressed: boolean,
 ): { toast: ToastKind | null; sound: SoundKind | null } {
-  if (previous === next) return { toast: null, sound: null };
+  if (previous === next || suppressed) return { toast: null, sound: null };
   if (next === "blocked") {
-    return { toast: suppressed ? null : "needs attention", sound: "request" };
+    return { toast: "needs attention", sound: "request" };
   }
   const completion = (next === "idle" || next === "done") &&
     (previous === "working" || previous === "blocked");
-  if (completion && !suppressed) return { toast: "ready for review", sound: "done" };
+  if (completion) return { toast: "ready for review", sound: "done" };
   return { toast: null, sound: null };
 }
 

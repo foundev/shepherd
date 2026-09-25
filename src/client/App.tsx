@@ -48,6 +48,7 @@ import {
 } from "./chrome.js";
 import { ChromeLine, Sidebar } from "./Sidebar.js";
 import {
+  MOBILE_BUTTON_WIDTH,
   mobileHeaderRows,
   revealScroll,
   switcherDocument,
@@ -340,6 +341,16 @@ export function App({
   const { columns, rows } = screen;
   const mainWidth = screen.main.width;
   const mainHeight = screen.main.height;
+  const notificationBar = screen.tabBar ?? (screen.header
+    ? {
+      x: screen.header.x,
+      y: screen.header.y + screen.header.height - 1,
+      width: Math.max(1, screen.header.width - MOBILE_BUTTON_WIDTH),
+      height: 1,
+    }
+    : screen.sidebar.width >= 18
+      ? { x: 0, y: rows - 1, width: screen.sidebar.width - 1, height: 1 }
+      : { x: screen.main.x, y: 0, width: mainWidth, height: 1 });
 
   const popupRect = useMemo(() => popup
     ? centeredRect(
@@ -377,6 +388,8 @@ export function App({
     [layout.panes, paneStyle, tabPaneCount],
   );
   const paneOrder = geometries.map((entry) => entry.paneId);
+  const visiblePaneIds = useRef<string[]>([]);
+  visiblePaneIds.current = paneOrder;
   const focusedPaneForFrames = state?.focusedPaneId ?? null;
   const frames = useMemo(
     () => paneFrames(geometries, layout.splits, paneStyle, focusedPaneForFrames),
@@ -532,6 +545,8 @@ export function App({
   }, [stdout, windowTitle]);
 
   useEffect(() => setAgentScroll(undefined), [state?.focusedPaneId, agentSort]);
+  // These row models capture theme colors. Invalidate them on config and
+  // host appearance changes even when the underlying pane state is idle.
   const sidebarModel = useMemo(() => state
     ? sidebarRows(state, {
       width: screen.sidebar.width,
@@ -552,11 +567,12 @@ export function App({
       sidebar: config.ui.sidebar,
     })
     : [], [
+      appearance,
       agentSort,
       agentScroll,
       collapsedGroups,
       collapsedMachines,
-      config.ui,
+      config,
       mode,
       navigateIndex,
       remoteDashboardOpen,
@@ -595,7 +611,7 @@ export function App({
       height: screen.header.height,
       indicators: config.ui.status_indicators,
     })
-    : [], [config.ui.status_indicators, screen.header, state]);
+    : [], [appearance, config, screen.header, state]);
   const switcherOpen = screen.mobile && mode === "navigate";
   const switcherDoc = useMemo(() => state && switcherOpen
     ? switcherDocument(state, {
@@ -605,7 +621,7 @@ export function App({
       navigateWorkspaceId: state.workspaces[navigateIndex]?.id ?? null,
       menu: GLOBAL_MENU.map((entry) => entry.label),
     })
-    : null, [agentSort, config.ui.status_indicators, navigateIndex, screen.columns, state, switcherOpen]);
+    : null, [agentSort, appearance, config, navigateIndex, screen.columns, state, switcherOpen]);
   const switcher = useMemo(() => switcherDoc
     ? switcherScreen(switcherDoc, {
       width: screen.columns,
@@ -662,16 +678,41 @@ export function App({
 
   stateRef.current = state;
 
+  const activeToasts = toasts.filter((entry) => !entry.paneId || (
+    !paneOrder.includes(entry.paneId) &&
+    state?.panes.some((pane) => pane.id === entry.paneId && pane.status === entry.status)
+  ));
+
   const pushToast = useCallback((toast: Omit<ToastEntry, "id">, ttl = 6_000) => {
     const id = `${Date.now()}-${Math.random()}`;
-    setToasts((current) => [...current.slice(-3), { ...toast, id }]);
+    setToasts((current) => [
+      ...current.filter((entry) => !toast.paneId || entry.paneId !== toast.paneId).slice(-3),
+      { ...toast, id },
+    ]);
     setTimeout(() => {
       setToasts((current) => current.filter((entry) => entry.id !== id));
     }, ttl);
   }, []);
 
+  // An in-app alert is redundant as soon as its terminal is on screen,
+  // even if the host has not sent a reliable focus report.
+  useEffect(() => {
+    setToasts((current) => {
+      const remaining = current.filter((entry) => !entry.paneId || (
+        !visiblePaneIds.current.includes(entry.paneId) &&
+        state?.panes.some((pane) => pane.id === entry.paneId && pane.status === entry.status)
+      ));
+      return remaining.length === current.length ? current : remaining;
+    });
+  }, [state]);
+
   /** Delivers a notification through the configured channel. */
   notifyRef.current = (notice: Notice) => {
+    const visible = Boolean(notice.paneId && visiblePaneIds.current.includes(notice.paneId));
+    const delivery = config.ui.toast.delivery;
+    const backend = delivery === "terminal" ? terminalNotifyBackend() : null;
+    const inApp = delivery === "shepherd" || (delivery === "terminal" && !backend);
+    if (visible && (hostFocused.current || inApp)) return;
     const soundConfig = config.ui.sound;
     const agentSound = notice.agent ? soundConfig.agents[notice.agent] : undefined;
     if (
@@ -688,7 +729,6 @@ export function App({
       );
     }
     if (notice.paneId) notificationTarget.current = notice.paneId;
-    const delivery = config.ui.toast.delivery;
     if (delivery === "off" || !notice.title) return;
     if (delivery === "system") {
       systemNotification(notice.title, notice.context);
@@ -696,7 +736,7 @@ export function App({
     }
     if (delivery === "terminal") {
       const sequence = terminalNotification(
-        terminalNotifyBackend(),
+        backend,
         notice.title,
         notice.context,
       );
@@ -710,22 +750,53 @@ export function App({
       context: notice.context,
       tone: notice.sound === "request" ? "attention" : "done",
       position: config.ui.toast.position,
+      paneId: notice.paneId ?? undefined,
+      status: notice.status,
     });
   };
 
   const lastAgentStatus = useRef(new Map<string, AgentStatus>());
+  const pendingNotifications = useRef(new Map<string, {
+    timer: NodeJS.Timeout;
+    ready: boolean;
+    deliver: () => void;
+  }>());
+  useEffect(() => () => {
+    for (const pending of pendingNotifications.current.values()) clearTimeout(pending.timer);
+    pendingNotifications.current.clear();
+  }, []);
+  useEffect(() => {
+    for (const pending of pendingNotifications.current.values()) {
+      if (pending.ready) pending.deliver();
+    }
+  }, [state]);
   agentEventRef.current = (data) => {
     const paneId = typeof data.paneId === "string" ? data.paneId : "";
     const status = data.status as AgentStatus;
     const previous = (data.previous as AgentStatus | undefined) ??
       lastAgentStatus.current.get(paneId);
     lastAgentStatus.current.set(paneId, status);
+    clearTimeout(pendingNotifications.current.get(paneId)?.timer);
+    pendingNotifications.current.delete(paneId);
+    setToasts((current) => {
+      const remaining = current.filter((entry) => entry.paneId !== paneId || entry.status === status);
+      return remaining.length === current.length ? current : remaining;
+    });
     const agent = typeof data.agent === "string" ? data.agent : "agent";
     const deliver = () => {
       const current = stateRef.current;
-      const pane = current?.panes.find((entry) => entry.id === paneId);
-      if (!current || !pane || pane.status !== status) return;
-      const visible = paneOrder.includes(paneId);
+      if (!current) return;
+      const pane = current.panes.find((entry) => entry.id === paneId);
+      if (!pane) {
+        pendingNotifications.current.delete(paneId);
+        return;
+      }
+      // The status event can arrive before state.get completes or React
+      // renders its response. Keep a due alert until that state is visible;
+      // a newer event cancels it above if the status changes again.
+      if (pane.status !== status) return;
+      pendingNotifications.current.delete(paneId);
+      const visible = visiblePaneIds.current.includes(paneId);
       const suppressed = visible && hostFocused.current;
       const decision = decideNotification(previous, status, suppressed);
       if (!decision.toast && !decision.sound) return;
@@ -745,9 +816,20 @@ export function App({
         paneId,
         agent,
         sound: decision.sound,
+        status,
       });
     };
-    setTimeout(deliver, config.ui.toast.delay_seconds * 1_000);
+    if (decideNotification(previous, status, false).toast) {
+      const pending = {
+        ready: false,
+        deliver,
+        timer: setTimeout(() => {
+          pending.ready = true;
+          deliver();
+        }, config.ui.toast.delay_seconds * 1_000),
+      };
+      pendingNotifications.current.set(paneId, pending);
+    }
   };
 
   // Invalid config values fall back to defaults; say so, like Shepherd's
@@ -1321,6 +1403,17 @@ export function App({
 
   const handleMouseInput = useCallback((event: MouseInputEvent) => {
     if (!state) return;
+    const barToast = activeToasts.findLast((entry) => entry.position === "bar");
+    if (barToast && !overlayOpen && !switcher &&
+      event.row - 1 === notificationBar.y &&
+      event.column - 1 >= notificationBar.x &&
+      event.column - 1 < notificationBar.x + notificationBar.width) {
+      if (event.action === "press" && event.button === "left") {
+        if (barToast.paneId) void connection.request({ type: "pane.focus", paneId: barToast.paneId });
+        setToasts((current) => current.filter((entry) => entry.id !== barToast.id));
+      }
+      return;
+    }
     if (menu) {
       if (event.action !== "press") return;
       const rect = menuRect(menu, screen.columns, screen.rows);
@@ -1726,6 +1819,7 @@ export function App({
       mode: "char",
     });
   }, [
+    activeToasts,
     activeWorkspace,
     chromeFor,
     connection,
@@ -1734,6 +1828,7 @@ export function App({
     layout.splits,
     mobileHeader,
     mode,
+    notificationBar,
     overlayOpen,
     paneStyle,
     remoteDashboardOpen,
@@ -1800,6 +1895,11 @@ export function App({
   let keyForwarded = false;
 
   const dispatchToken = (token: InputToken): boolean => {
+    // Typing, pasting or clicking is also proof of focus. Some hosts miss
+    // the focus-in report after sending focus-out.
+    if (token.kind === "key" || token.kind === "paste" || token.kind === "mouse") {
+      hostFocused.current = true;
+    }
     if (token.kind === "mouse") {
       handleMouseInput(token.event);
       return false;
@@ -3421,6 +3521,7 @@ export function App({
                   width={geometry.rect.width}
                   height={geometry.rect.height}
                   lines={surface?.lines ?? EMPTY_LINES}
+                  foregroundColor={theme.text}
                   label={pane.metadataTitle || pane.title ||
                     (config.ui.show_agent_labels_on_pane_borders
                       ? pane.displayAgent || pane.agent || ""
@@ -3506,8 +3607,14 @@ export function App({
           />
         </Panel>
       )}
-      {toasts.length > 0 && (
-        <ToastStack toasts={toasts} columns={columns} rows={rows} />
+      {activeToasts.length > 0 && !overlayOpen && !switcher && (
+        <ToastStack
+          toasts={activeToasts}
+          columns={columns}
+          rows={rows}
+          barRect={notificationBar}
+          openLabel={keymap.labels.get("open_notification_target")?.[0]}
+        />
       )}
     </Box>
   );
@@ -3552,6 +3659,7 @@ interface Notice {
   paneId: string | null;
   agent?: string;
   sound: "done" | "request" | null;
+  status?: AgentStatus;
 }
 
 /** A text field with its cursor drawn as an inverted cell. */

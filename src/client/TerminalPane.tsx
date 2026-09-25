@@ -1,6 +1,7 @@
 import { memo } from "react";
 import { Box, Text } from "ink";
 import { statusColor, theme } from "./theme.js";
+import { terminalColor, terminalForegroundColor } from "./colors.js";
 import { displayWidth, type BorderCell, type PaneFrame } from "./geometry.js";
 import { statusIcon, truncateText } from "./chrome.js";
 import {
@@ -15,6 +16,8 @@ interface TerminalPaneProps {
   width: number;
   height: number;
   lines: TerminalLine[];
+  /** Default text color, passed explicitly so theme changes invalidate memoized rows. */
+  foregroundColor?: string;
   /** Border label; empty for none (labels appear when explicitly set). */
   label?: string;
   bordered?: boolean;
@@ -39,6 +42,7 @@ export const TerminalPane = memo(function TerminalPane({
   width,
   height,
   lines,
+  foregroundColor = theme.text,
   label = "",
   bordered = true,
   frame,
@@ -74,6 +78,7 @@ export const TerminalPane = memo(function TerminalPane({
         <TerminalRow
           key={index}
           line={lines[index]}
+          foregroundColor={foregroundColor}
           selected={selection
             ? selectedColumns(selection, viewTop + index, contentCols)
             : null}
@@ -181,6 +186,7 @@ const EMPTY_LINE: TerminalLine = [];
  * scrollbar stay in their column. */
 const TerminalRow = memo(function TerminalRow({
   line = EMPTY_LINE,
+  foregroundColor,
   selected,
   cursorCol,
   width,
@@ -189,6 +195,7 @@ const TerminalRow = memo(function TerminalRow({
   gutter,
 }: {
   line?: TerminalLine;
+  foregroundColor?: string;
   selected: [number, number] | null;
   cursorCol: number | null;
   width: number;
@@ -203,13 +210,13 @@ const TerminalRow = memo(function TerminalRow({
   const clipped = clip(spans, width);
   const used = clipped.reduce((total, span) => total + displayWidth(span.text), 0);
   return (
-    <Text wrap="truncate-end">
+    <Text wrap="truncate-end" color={foregroundColor}>
       {left ? <Text color={left.color}>{left.text}</Text> : null}
       {clipped.map((span, index) => (
         <Text
           key={index}
-          color={span.color}
-          backgroundColor={span.backgroundColor}
+          color={terminalForegroundColor(span.color, span.bold)}
+          backgroundColor={terminalColor(span.backgroundColor)}
           bold={span.bold}
           italic={span.italic}
           dimColor={span.dimColor}
@@ -227,6 +234,7 @@ const TerminalRow = memo(function TerminalRow({
   );
 }, (previous, next) =>
   previous.line === next.line &&
+  previous.foregroundColor === next.foregroundColor &&
   previous.width === next.width &&
   previous.cursorCol === next.cursorCol &&
   previous.left?.text === next.left?.text &&

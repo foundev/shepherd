@@ -64,6 +64,71 @@ afterEach(() => {
 });
 
 describe("pane terminal", () => {
+  it.each(["history", "handoff"])("keeps backgrounds and inverse spaces through snapshots and %s replay", async (source) => {
+    const target = pane(
+      "printf 'label\\033[44m\\033[K\\033[0m\\r\\n" +
+      "\\033[42m    \\033[0m\\r\\n" +
+      "\\033[7m    \\033[0m'; sleep 5",
+    );
+    await screenContaining(target, "label");
+    const lines = target.snapshot(3);
+    expect(lines[0]).toContainEqual(expect.objectContaining({
+      text: " ".repeat(target.cols - 5), backgroundColor: "blue",
+    }));
+    expect(lines[1]).toContainEqual(expect.objectContaining({ text: "    ", backgroundColor: "green" }));
+    expect(lines[2]).toContainEqual(expect.objectContaining({ text: "    ", inverse: true }));
+    const replay = source === "history" ? target.historyAnsi() : target.handoffState()?.replay;
+    expect(replay).toBeTruthy();
+    const restored = new PaneTerminal({
+      id: "restored-backgrounds", title: "restored", cwd: os.tmpdir(),
+      command: "sleep 5", replay: replay!,
+    });
+    panes.push(restored);
+    await screenContaining(restored, "label");
+    expect(restored.snapshot(3)).toEqual(lines);
+  });
+
+  it("preserves shell palette colors, bold, and explicit RGB through history replay", async () => {
+    const colors = [
+      "black", "red", "green", "yellow", "blue", "magenta", "cyan", "white",
+      "blackBright", "redBright", "greenBright", "yellowBright",
+      "blueBright", "magentaBright", "cyanBright", "whiteBright",
+    ];
+    const palette = colors.map((_, index) => {
+      const foreground = index < 8 ? 30 + index : 90 + index - 8;
+      return `\\033[${foreground};${foreground + 10}m${String.fromCharCode(65 + index)}`;
+    }).join("");
+    const target = pane(
+      `printf '${palette}\\033[0;1;32muser\\033[0m:` +
+      "\\033[1;34mdir\\033[0m " +
+      "\\033[38;2;0;0;128;48;2;16;23;34mrgb\\033[0m " +
+      "\\033[38;5;24mindexed\\033[0m done'; sleep 5",
+    );
+    await screenContaining(target, "done");
+    const lines = target.snapshot(30, "recent").filter((line) => line.length > 0);
+    const spans = lines.flat();
+    for (const [index, color] of colors.entries()) {
+      expect(spans).toContainEqual(expect.objectContaining({
+        text: String.fromCharCode(65 + index), color, backgroundColor: color,
+      }));
+    }
+    expect(spans).toEqual(expect.arrayContaining([
+      expect.objectContaining({ text: "user", color: "green", bold: true }),
+      expect.objectContaining({ text: "dir", color: "blue", bold: true }),
+      expect.objectContaining({ text: "rgb", color: "#000080", backgroundColor: "#101722" }),
+      expect.objectContaining({ text: "indexed", color: "#005f87" }),
+      expect.objectContaining({ text: expect.stringMatching(/^ done\s*$/), color: undefined }),
+    ]));
+
+    const restored = new PaneTerminal({
+      id: "restored-colors", title: "restored", cwd: os.tmpdir(),
+      command: "sleep 5", replay: target.historyAnsi()!,
+    });
+    panes.push(restored);
+    await screenContaining(restored, "done");
+    expect(restored.snapshot(30, "recent").filter((line) => line.length > 0)).toEqual(lines);
+  });
+
   it("answers cursor position queries from the app", async () => {
     const target = pane(
       "printf 'ab\\033[6n'; IFS= read -rs -d R reply; " +

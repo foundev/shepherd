@@ -9,6 +9,7 @@ import React from "react";
 import { App } from "./client/App.js";
 import { ClientConnection } from "./client/connection.js";
 import { ScreenWriter } from "./client/screenWriter.js";
+import { configureTerminalColors } from "./client/colors.js";
 import { loadConfig } from "./config/model.js";
 import { DEFAULT_CONFIG_TEXT } from "./config/defaultText.js";
 import { decodeStream, encodeMessage } from "./protocol.js";
@@ -174,6 +175,7 @@ async function runAttachedUi(
   loaded: LoadedConfig,
   reloadConfig: () => LoadedConfig,
 ): Promise<void> {
+  const restoreColors = configureTerminalColors();
   // Draw on the alternate screen so the UI owns the whole terminal and the
   // user's scrollback is restored on detach.
   // Save the window title (XTWINOPS 22) so detaching restores it.
@@ -198,6 +200,7 @@ async function runAttachedUi(
     screenWriter.dispose();
     leaveAlternateScreen();
     process.removeListener("exit", leaveAlternateScreen);
+    restoreColors();
   });
 }
 

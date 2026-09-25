@@ -90,6 +90,17 @@ Built-in themes are `shepherd`, `shepherd-day`, `aurora`, `ember`, `midnight`,
 `orchid`, `glacier`, `parchment`, and `terminal`. Each supports custom color
 overrides. Use `shepherd config template` for an annotated configuration file.
 
+Pane text uses the theme's default foreground. Standard ANSI colors retain
+your terminal's palette, including bright colors for bold shell prompts and
+directory listings. Applications' explicit RGB colors are preserved.
+
+Windows Terminal is recognized through WSL's `WT_SESSION`, even when
+`COLORTERM` is unset. On 256-color terminals, RGB colors are matched against
+the full fixed palette, including grayscale, so dark surfaces stay dark.
+`FORCE_COLOR=0`, `1`, `2`, or `3` explicitly selects no color, 16 colors,
+256 colors, or truecolor; `NO_COLOR` disables colors unless overridden by
+`FORCE_COLOR`.
+
 The visual goal is a distinctive, polished terminal dashboard. The active
 pane, agents needing attention, and the current local or remote workspace
 should stand out at a glance. Mouse and keyboard flows should expose the same
@@ -171,6 +182,14 @@ Ctrl+B ?      shortcut reminder
 ```
 
 In terminal mode, unbound keys—including Ctrl+C—are forwarded to the focused PTY.
+
+Agent alerts never pop up over their own visible terminal. Background alerts
+default to a single line in the tab bar (or mobile header/sidebar footer),
+leaving the prompt clear. Click an alert or use `Ctrl+B o` to open its pane;
+viewing the pane clears its alert. `[ui.toast.shepherd] position = "bar"`
+selects this layout; explicit corner positions remain available. With both
+the tab bar and sidebar hidden, the alert uses one line at the top of the screen.
+Desktop notification delivery remains available while the host terminal is unfocused.
 
 ## Supervising agents
 
