@@ -1,6 +1,7 @@
-import { execFileSync } from "node:child_process";
+import { execFile, execFileSync } from "node:child_process";
 import fs from "node:fs";
 import { createRequire } from "node:module";
+import { promisify } from "node:util";
 import pty from "node-pty";
 import { ANSI_COLORS } from "../ansiColors.js";
 import type {
@@ -25,6 +26,7 @@ type HeadlessTerminalConstructor = new (
 type HeadlessTerminal = InstanceType<HeadlessTerminalConstructor>;
 
 const nodeRequire = createRequire(import.meta.url);
+const execFileAsync = promisify(execFile);
 const { Terminal } = nodeRequire("@xterm/headless") as {
   Terminal: HeadlessTerminalConstructor;
 };
@@ -60,6 +62,8 @@ export interface PaneTerminalOptions {
   onBell?: () => void;
   /** Called after output has been parsed into the screen. */
   onChange?: () => void;
+  /** The pane's reported or observed working directory changed. */
+  onCwdChange?: () => void;
   /** The app wrote to the clipboard with OSC 52. */
   onClipboard?: (text: string) => void;
 }
@@ -142,6 +146,9 @@ export class PaneTerminal {
   revision = 0;
 
   private readonly notifyChange?: () => void;
+  private readonly notifyCwdChange?: () => void;
+  private hasReportedCwd = false;
+  private refreshingCwd = false;
   private readonly ptyProcess: pty.IPty | AdoptedPty;
   private readonly terminal: HeadlessTerminal;
   private closed = false;
@@ -152,6 +159,7 @@ export class PaneTerminal {
     this.cwd = options.cwd;
     this.currentCwd = options.cwd;
     this.notifyChange = options.onChange;
+    this.notifyCwdChange = options.onCwdChange;
     this.command = options.command ?? null;
     this.createdAt = new Date().toISOString();
     this.detector.setAgent(detectAgentFromCommand(options.command ?? ""), Date.now());
@@ -206,7 +214,10 @@ export class PaneTerminal {
     });
     this.terminal.parser.registerOscHandler(7, (data) => {
       const cwd = cwdFromOsc7(data);
-      if (cwd) this.currentCwd = cwd;
+      if (cwd) {
+        this.hasReportedCwd = true;
+        this.updateCwd(cwd);
+      }
       return true;
     });
 
@@ -244,6 +255,41 @@ export class PaneTerminal {
 
   get processId(): number | undefined {
     return this.ptyProcess.pid;
+  }
+
+  /** Resolve on demand when creating a pane, without waiting for the poll. */
+  resolveCwd(): string {
+    if (!this.hasReportedCwd && !this.closed && this.exitCode === null && this.processId) {
+      this.updateCwd(processCwd(this.processId));
+    }
+    return this.currentCwd;
+  }
+
+  /** Shells without OSC 7 still follow cd. Keep process I/O off render paths. */
+  async refreshCwd(): Promise<void> {
+    if (this.hasReportedCwd || this.refreshingCwd || this.closed || this.exitCode !== null || !this.processId) return;
+    this.refreshingCwd = true;
+    try {
+      let cwd: string | null = null;
+      if (process.platform === "linux") {
+        cwd = await fs.promises.readlink(`/proc/${this.processId}/cwd`);
+      } else if (process.platform === "darwin") {
+        const { stdout } = await execFileAsync("lsof", ["-a", "-p", String(this.processId), "-d", "cwd", "-Fn"], { timeout: 500 });
+        cwd = stdout.split("\n").find((line) => line.startsWith("n"))?.slice(1) ?? null;
+      }
+      // An OSC report or process exit may have arrived while the read ran.
+      if (!this.hasReportedCwd && !this.closed && this.exitCode === null) this.updateCwd(cwd);
+    } catch {
+      // Keep the last known directory if the process is unavailable.
+    } finally {
+      this.refreshingCwd = false;
+    }
+  }
+
+  private updateCwd(cwd: string | null): void {
+    if (!cwd || cwd === this.currentCwd) return;
+    this.currentCwd = cwd;
+    this.notifyCwdChange?.();
   }
 
   write(data: string): void {

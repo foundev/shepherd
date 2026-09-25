@@ -149,8 +149,9 @@ export interface WorkspaceView {
   id: string;
   /** Custom name, or "" when the workspace uses its derived label. */
   name: string;
-  /** Display label: custom name, else Git repository, else directory. */
+  /** Display label: custom name, else Git checkout, else directory. */
   label?: string;
+  /** Live directory of the root pane in the first tab. */
   rootPath: string;
   tabs: TabView[];
   activeTabId: string;

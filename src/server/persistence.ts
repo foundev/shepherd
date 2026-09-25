@@ -19,6 +19,8 @@ export interface PersistedTab {
   id: string;
   name: string;
   layout: LayoutNode;
+  /** Stable directory source, independent of focus and pane swaps. */
+  rootPaneId?: string;
   focusedPaneId: string;
   zoomedPaneId?: string | null;
 }

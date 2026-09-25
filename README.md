@@ -183,6 +183,11 @@ Ctrl+B ?      shortcut reminder
 
 In terminal mode, unbound keys—including Ctrl+C—are forwarded to the focused PTY.
 
+Spaces are named automatically from the current Git checkout or directory of
+the root pane in their first tab. Running `cd` there updates the space's label
+and Git information; focusing another pane or tab keeps the label stable.
+Use `Ctrl+B W` to set a custom name, or clear the name to resume automatic naming.
+
 Agent alerts never pop up over their own visible terminal. Background alerts
 default to a single line in the tab bar (or mobile header/sidebar footer),
 leaving the prompt clear. Click an alert or use `Ctrl+B o` to open its pane;
