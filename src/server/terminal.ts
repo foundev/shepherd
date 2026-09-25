@@ -633,7 +633,11 @@ export class PaneTerminal {
     const normal = this.terminal.buffer.normal;
     const cols = this.terminal.cols;
     let last = normal.length - 1;
-    while (last >= 0 && !normal.getLine(last)?.translateToString(true).trim()) last -= 1;
+    while (last >= 0) {
+      const line = normal.getLine(last);
+      if (line && styledLine(line, cols).length > 0) break;
+      last -= 1;
+    }
     if (last < 0) return null;
     let out = "";
     for (let index = Math.max(0, normal.length - 5_000); index <= last; index += 1) {
@@ -942,7 +946,10 @@ function styledLine(
 
   while (spans.length > 0) {
     const last = spans[spans.length - 1];
-    if (!last || last.text.trim().length !== 0) break;
+    // Spaces can paint backgrounds, selections, or rules. Trim only cells
+    // whose absence renders identically to the default empty pane.
+    if (!last || last.text.trim().length !== 0 || last.backgroundColor !== undefined ||
+      last.inverse || last.underline || last.strikethrough) break;
     spans.pop();
   }
   return spans;
