@@ -104,6 +104,33 @@ describe("Shepherd UI", () => {
     }
   });
 
+  it("refreshes idle pane chrome when a custom foreground stays fixed across appearance changes", async () => {
+    const restore = configureTerminalColors({ isTTY: true }, { FORCE_COLOR: "3" });
+    const config = defaultLoadedConfig();
+    config.config.theme.auto_switch = true;
+    config.config.theme.custom.text = "#abcdef";
+    config.config.ui.pane_scrollbars = false;
+    const instance = render(<App connection={new FakeConnection(testState())} config={config} />);
+    try {
+      await flushApp();
+      const headerY = fixtureGeometry(config).screen.main.y;
+      const header = () => (instance.lastFrame() ?? "").split("\n")[headerY] ?? "";
+      expect(header()).toContain("\x1b[48;2;32;35;43m");
+      instance.stdin.write("\x1b[?997;2n");
+      await flushApp();
+      expect(header()).toContain("\x1b[48;2;238;236;242m");
+      expect(header()).not.toContain("\x1b[48;2;32;35;43m");
+      instance.stdin.write("\x1b[?997;1n");
+      await flushApp();
+      expect(header()).toContain("\x1b[48;2;32;35;43m");
+      expect(header()).not.toContain("\x1b[48;2;238;236;242m");
+    } finally {
+      instance.unmount();
+      restore();
+      applyTheme("shepherd");
+    }
+  });
+
   it("pages and scrolls overflow agents without sending wheel input to a pane", async () => {
     const state = { ...testState(), machines: [] };
     const workspace = state.workspaces[0]!;

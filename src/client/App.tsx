@@ -178,6 +178,9 @@ export function App({
       config.ui.accent,
     );
   }, [appearance, config]);
+  // Pane chrome also depends on colors that can change while its terminal
+  // foreground stays fixed (for example, a custom text color in both modes).
+  const paneAppearanceKey = useMemo(() => JSON.stringify(theme), [appearance, config]);
   const [mode, setMode] = useState<Mode>("terminal");
   const [navigateIndex, setNavigateIndex] = useState(0);
   /** Scroll offset of the phone-width switcher's list. */
@@ -3558,6 +3561,7 @@ export function App({
                   height={geometry.rect.height}
                   lines={surface?.lines ?? EMPTY_LINES}
                   foregroundColor={theme.text}
+                  appearanceKey={paneAppearanceKey}
                   showAgentLabel={config.ui.show_agent_labels_on_pane_borders}
                   label={pane.metadataTitle || pane.title ||
                     (config.ui.show_agent_labels_on_pane_borders

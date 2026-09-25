@@ -71,6 +71,26 @@ describe("task-first sidebar cards", () => {
     expect(rows.some((row) => row.target?.kind === "agent" && row.target.paneId === "p9")).toBe(true);
   });
 
+  it.each([[7, 1], [8, 1], [9, 2]] as const)(
+    "keeps workspace navigation and the focused agent visible at %i rows",
+    (height, capacity) => {
+      const fleet = state();
+      fleet.panes = Array.from({ length: 3 }, (_, index) => ({ ...fleet.panes[0]!, id: `p${index}` }));
+      fleet.workspaces = fleet.panes.map((pane, index) => ({
+        id: `w${index}`, name: `project-${index}`, rootPath: "/work", activeTabId: `t${index}`,
+        tabs: [{ id: `t${index}`, layout: { kind: "pane", paneId: pane.id } }],
+      }));
+      for (const mouse of [true, false]) {
+        const rows = sidebarRows(fleet, { ...options, height, mouse, focusedPaneId: "p1", activeWorkspaceId: "w1" });
+        const navigation = rows.filter((row) => row.target?.kind === "workspace");
+        expect(navigation).toHaveLength(capacity);
+        expect(navigation.some((row) => row.target?.kind === "workspace" && row.target.id === "w1")).toBe(true);
+        expect(rows.some((row) => row.target?.kind === "agent" && row.target.paneId === "p1")).toBe(true);
+        expect(rows).toHaveLength(height);
+      }
+    },
+  );
+
   it("keeps previously visible git workspaces reachable by mouse", () => {
     const fleet = state();
     fleet.panes = Array.from({ length: 7 }, (_, index) => ({ ...fleet.panes[0]!, id: `p${index}` }));

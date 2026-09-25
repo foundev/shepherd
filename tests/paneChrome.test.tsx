@@ -1,7 +1,7 @@
 import { Box, renderToString } from "ink";
 import { describe, expect, it } from "vitest";
 import { TerminalPane } from "../src/client/TerminalPane.js";
-import { displayWidth, type PaneFrame } from "../src/client/geometry.js";
+import { computeLayout, displayWidth, framePanes, paneContentRect, paneFrames, type PaneFrame } from "../src/client/geometry.js";
 import { configureTerminalColors } from "../src/client/colors.js";
 import { applyTheme, theme } from "../src/client/theme.js";
 import type { AgentTask, PaneView } from "../src/types.js";
@@ -35,6 +35,44 @@ function cellAt(text: string, column: number): string | undefined {
 }
 
 describe("pane chrome", () => {
+  it.each(["right", "down"] as const)("keeps focus distinguishable on either side of a shared %s split", (direction) => {
+    const restore = configureTerminalColors({ isTTY: true }, { FORCE_COLOR: "0" });
+    try {
+      const layout = computeLayout({
+        kind: "split", direction, ratio: 0.5,
+        first: { kind: "pane", paneId: "p1" }, second: { kind: "pane", paneId: "p2" },
+      }, { x: 0, y: 0, width: 60, height: 12 });
+      for (const gaps of [false, true]) {
+        const style = { borders: "always" as const, gaps, outerBorders: false };
+        const geometries = framePanes(layout.panes, style);
+        const draws = ["p1", "p2"].map((focusedPaneId) => {
+          const frames = paneFrames(geometries, layout.splits, style, focusedPaneId);
+          return renderToString(
+            <Box width={60} height={12}>
+              {geometries.map(({ paneId, rect, edges }) => {
+                const content = paneContentRect(rect, { bordered: false, edges, scrollbar: false });
+                return <Box key={paneId} position="absolute" marginLeft={rect.x} marginTop={rect.y}>
+                  <TerminalPane pane={{ ...pane, id: paneId, agent: null }} focused={paneId === focusedPaneId}
+                    width={rect.width} height={rect.height} frame={frames.get(paneId)}
+                    lines={Array.from({ length: content.height }, () => [{ text: "x".repeat(content.width) }])} />
+                </Box>;
+              })}
+            </Box>, { columns: 60 },
+          );
+        });
+        expect(draws[0]).toContain(direction === "right" ? "◂" : "↑");
+        expect(draws[1]).toContain(direction === "right" ? "▸" : "▎");
+        expect(draws[0]).not.toBe(draws[1]);
+        for (const output of draws) {
+          const rows = output.split("\n");
+          expect(rows).toHaveLength(12);
+          rows.forEach((row) => expect(displayWidth(row)).toBe(60));
+          expect(output.match(/[◂▸↑▎]/gu)).toHaveLength(1);
+        }
+      }
+    } finally { restore(); }
+  });
+
   it("retains its neutral title surface inside the application's canvas", () => {
     const restore = configureTerminalColors({ isTTY: true }, { FORCE_COLOR: "3" });
     try {

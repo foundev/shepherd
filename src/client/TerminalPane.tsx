@@ -19,6 +19,8 @@ interface TerminalPaneProps {
   lines: TerminalLine[];
   /** Default text color, passed explicitly so theme changes invalidate memoized rows. */
   foregroundColor?: string;
+  /** Palette identity, so chrome refreshes even when the default text color stays unchanged. */
+  appearanceKey?: string;
   /** Border label; empty for none (labels appear when explicitly set). */
   label?: string;
   /** Show the agent identity next to a distinct pane title. */
@@ -64,8 +66,10 @@ export const TerminalPane = memo(function TerminalPane({
     : null;
   const side = (cells: BorderCell[] | null, index: number) => {
     const cell = cells?.[index];
-    const focusCue = focused && !edges.top && index === 0 && cells === (edges.left ?? edges.right);
-    return cell ? { text: cell.text, color: focusCue ? theme.brand : theme.border } : null;
+    const cue = edges.focusCue;
+    const focusCue = cue && cue.index === index && cells === edges[cue.edge];
+    const fallback = !cue && focused && !edges.top && index === 0 && cells === (edges.left ?? edges.right);
+    return cell ? { text: focusCue ? cue.text : cell.text, color: focusCue || fallback ? theme.brand : theme.border } : null;
   };
 
   return (
@@ -77,6 +81,7 @@ export const TerminalPane = memo(function TerminalPane({
           showAgentLabel={showAgentLabel}
           focused={focused}
           pane={pane}
+          focusCue={edges.focusCue?.edge === "top" ? edges.focusCue : undefined}
         />
       )}
       {Array.from({ length: contentRows }, (_, index) => (
@@ -100,7 +105,8 @@ export const TerminalPane = memo(function TerminalPane({
             : null}
         />
       ))}
-      {edges.bottom && <PaneFooter cells={edges.bottom} pane={pane} />}
+      {edges.bottom && <PaneFooter cells={edges.bottom} pane={pane}
+        focusCue={edges.focusCue?.edge === "bottom" ? edges.focusCue : undefined} />}
     </Box>
   );
 });
@@ -148,9 +154,16 @@ function putBorderText(cells: BorderRun[], start: number, text: string, color?: 
   for (let index = start + 1; index < start + width; index += 1) cells[index] = { text: "" };
 }
 
-function BorderLine({ cells, background }: { cells: BorderRun[]; background?: string }) {
+type RowFocusCue = { index: number; text: string };
+
+function BorderLine({ cells, background, focusCue }: {
+  cells: BorderRun[];
+  background?: string;
+  focusCue?: RowFocusCue;
+}) {
   const runs: BorderRun[] = [];
-  for (const cell of cells) {
+  for (let index = 0; index < cells.length; index += 1) {
+    const cell = focusCue?.index === index ? { text: focusCue.text, color: theme.brand, bold: true } : cells[index]!;
     if (!cell.text) continue;
     const previous = runs.at(-1);
     if (previous && previous.color === cell.color && previous.bold === cell.bold) previous.text += cell.text;
@@ -171,21 +184,28 @@ function PaneHeader({
   showAgentLabel,
   focused,
   pane,
+  focusCue,
 }: {
   cells: BorderCell[];
   label: string;
   showAgentLabel: boolean;
   focused: boolean;
   pane: PaneView;
+  focusCue?: RowFocusCue;
 }) {
-  const slots = borderSlots(cells);
-  const row: BorderRun[] = cells.map((cell, index) => ({
+  // Reserve the shared-divider cue before laying out text, including when
+  // the focused pane starts in the middle of a neighbour's wider edge.
+  const borderCells = focusCue
+    ? cells.map((cell, index) => index === focusCue.index ? { ...cell, text: focusCue.text } : cell)
+    : cells;
+  const slots = borderSlots(borderCells);
+  const row: BorderRun[] = borderCells.map((cell, index) => ({
     text: index > 0 && index < cells.length - 1 && cell.text === "─" ? " " : cell.text,
     color: theme.border,
   }));
   const first = slots[0];
   const last = slots.at(-1);
-  if (!first || !last) return <BorderLine cells={row} background={theme.surfaceRaised} />;
+  if (!first || !last) return <BorderLine cells={row} background={theme.surfaceRaised} focusCue={focusCue} />;
 
   const lane = deskLane(pane);
   const state = {
@@ -224,16 +244,16 @@ function PaneHeader({
     }
     putBorderText(row, cursor, truncateText(title, titleEnd - cursor), theme.text, !showIdentity);
   }
-  return <BorderLine cells={row} background={theme.surfaceRaised} />;
+  return <BorderLine cells={row} background={theme.surfaceRaised} focusCue={focusCue} />;
 }
 
 /** Path and checks use only the bottom edge, and only reported checks get a result. */
-function PaneFooter({ cells, pane }: { cells: BorderCell[]; pane: PaneView }) {
+function PaneFooter({ cells, pane, focusCue }: { cells: BorderCell[]; pane: PaneView; focusCue?: RowFocusCue }) {
   const row: BorderRun[] = cells.map((cell) => ({ text: cell.text, color: theme.border }));
   const slots = borderSlots(cells);
   const first = slots[0];
   const last = slots.at(-1);
-  if (cells.length < 44 || !first || !last) return <BorderLine cells={row} />;
+  if (cells.length < 44 || !first || !last) return <BorderLine cells={row} focusCue={focusCue} />;
   const checks = pane.task?.checkStatus;
   const check = checks === "passed" ? { label: "✓ checks passed", color: theme.success }
     : checks === "failed" ? { label: "× checks failed", color: theme.danger }
@@ -256,7 +276,7 @@ function PaneFooter({ cells, pane }: { cells: BorderCell[]; pane: PaneView }) {
     }
     putBorderText(row, first[0], ` ${path} `, theme.muted);
   }
-  return <BorderLine cells={row} />;
+  return <BorderLine cells={row} focusCue={focusCue} />;
 }
 
 /** Thumb rows [start, end) for the scrollbar, or null with no scrollback. */

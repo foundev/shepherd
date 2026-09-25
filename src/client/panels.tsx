@@ -37,6 +37,9 @@ export function Panel({
 }) {
   const inner = Math.max(0, rect.width - 2);
   const label = title && inner >= 3 ? ` ${truncateText(title, inner - 2)} ` : "";
+  // The terminal palette leaves text unset and uses gray for both surfaces
+  // and borders. Preserve terminal defaults rather than painting gray on gray.
+  const titleBackground = label && theme.surfaceRaised !== borderColor ? theme.surfaceRaised : theme.panelBg;
   return (
     <Box
       position="absolute"
@@ -47,10 +50,10 @@ export function Panel({
       flexDirection="column"
       overflow="hidden"
     >
-      <Text color={borderColor} backgroundColor={label ? theme.surfaceRaised : theme.panelBg} wrap="truncate-end">
-        {"╭"}
-        {label && <Text color={theme.text} backgroundColor={theme.surfaceRaised} bold>{label}</Text>}
-        {`${(label ? " " : "─").repeat(Math.max(0, inner - displayWidth(label)))}╮`}
+      <Text backgroundColor={titleBackground} wrap="truncate-end">
+        <Text color={borderColor}>{"╭"}</Text>
+        {label && <Text color={theme.text} backgroundColor={titleBackground} bold>{label}</Text>}
+        <Text color={borderColor}>{`${(label ? " " : "─").repeat(Math.max(0, inner - displayWidth(label)))}╮`}</Text>
       </Text>
       <Box flexDirection="row" height={rect.height - 2}>
         <Box flexDirection="column" width={1}>

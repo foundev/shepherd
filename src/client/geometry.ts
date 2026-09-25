@@ -241,6 +241,8 @@ export interface PaneFrame {
   bottom: BorderCell[] | null;
   left: BorderCell[] | null;
   right: BorderCell[] | null;
+  /** A fallback marker on an existing edge when the focused pane has no title row. */
+  focusCue?: { edge: keyof PaneEdges; index: number; text: string };
 }
 
 const UP = 1;
@@ -367,6 +369,32 @@ export function paneFrames(
       left: edges.left ? column(rect.x) : null,
       right: edges.right ? column(right) : null,
     });
+  }
+  const focusedFrame = focusedPaneId ? frames.get(focusedPaneId) : undefined;
+  if (focused && focusedFrame && !focusedFrame.top) {
+    // Prefer an edge owned by the focused pane. Arrows point into it so a
+    // shared divider still distinguishes focus on either side of the line.
+    if (focusedFrame.left?.length) focusedFrame.focusCue = { edge: "left", index: 0, text: "▸" };
+    else if (focusedFrame.right?.length) focusedFrame.focusCue = { edge: "right", index: 0, text: "◂" };
+    else if (focusedFrame.bottom?.length) focusedFrame.focusCue = { edge: "bottom", index: 0, text: "↑" };
+    else {
+      // Without outer borders or gaps, the neighbour owns the only divider.
+      const neighbour = panes.find(({ rect, edges }) => edges.left &&
+        rect.x === focused.x + focused.width && overlaps(rect.y, rect.height, focused.y, focused.height));
+      if (neighbour) {
+        const frame = frames.get(neighbour.paneId)!;
+        const firstRow = neighbour.rect.y + (neighbour.edges.top ? 1 : 0);
+        const index = Math.max(0, focused.y - firstRow);
+        if (frame.left?.[index]) frame.focusCue = { edge: "left", index, text: "◂" };
+      } else {
+        const below = panes.find(({ rect, edges }) => edges.top &&
+          rect.y === focused.y + focused.height && overlaps(rect.x, rect.width, focused.x, focused.width));
+        if (below) {
+          const frame = frames.get(below.paneId)!;
+          frame.focusCue = { edge: "top", index: Math.max(0, focused.x - below.rect.x), text: "↑" };
+        }
+      }
+    }
   }
   return frames;
 }

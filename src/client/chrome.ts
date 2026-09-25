@@ -626,16 +626,20 @@ function expandedRows(state: StateView, options: SidebarOptions): ChromeRow[] {
   // Navigation takes the space its content needs. The agent list gets the
   // remainder instead of inheriting a fixed half-screen empty region.
   const bodyStart = brandHeight + 1;
+  const sectionGap = height >= 14 ? 1 : 0;
+  // On short screens, drop section spacing before workspace rows. Reserve
+  // the agents heading, one agent row, the bottom rail, and mouse controls.
+  const reservedRows = 3 + sectionGap * 2 + (options.mouse ? 1 : 0);
   // Retain the previous navigation capacity: unlike agents, workspaces do
   // not have an independent scroll viewport. Short lists still shrink.
-  const bodyRows = Math.min(body.length, Math.max(1, Math.round(height * 0.5) - 3), Math.max(0, height - bodyStart - 6));
+  const bodyRows = Math.min(body.length, Math.max(1, Math.round(height * 0.5) - 3), Math.max(0, height - bodyStart - reservedRows));
   const selectedRemote = options.selectedRemote;
   const activeIndex = body.findIndex((row) => selectedRemote
     ? row.target?.kind === "remote-workspace" && row.target.machineId === selectedRemote.machineId
       && row.target.workspaceId === selectedRemote.workspaceId
     : row.target?.kind === "workspace" && row.target.id === options.activeWorkspaceId);
   const offset = activeIndex >= bodyRows
-    ? Math.min(Math.max(0, activeIndex - bodyRows + 2), Math.max(0, body.length - bodyRows)) : 0;
+    ? Math.min(Math.max(0, activeIndex - bodyRows + (bodyRows > 1 ? 2 : 1)), Math.max(0, body.length - bodyRows)) : 0;
   for (let index = 0; index < bodyRows; index += 1) {
     const row = body[offset + index];
     if (row) rows[bodyStart + index] = row;
@@ -646,7 +650,7 @@ function expandedRows(state: StateView, options: SidebarOptions): ChromeRow[] {
       segments: fit([{ text: "  + New workspace", color: theme.muted, target: { kind: "new-workspace" } }], width),
     };
   }
-  const agentsTop = Math.min(height - 2, footerRow + (options.mouse ? 2 : 1));
+  const agentsTop = Math.min(height - 2, footerRow + (options.mouse ? 1 : 0) + sectionGap);
   const agents = agentEntries(state, options.sort);
   const grouped = normalizeAgentSort(options.sort) === "status" && !state.agentView?.sort.length;
   if (agentsTop >= 0) {
@@ -660,7 +664,7 @@ function expandedRows(state: StateView, options: SidebarOptions): ChromeRow[] {
       ),
     };
   }
-  const agentsBody = Math.max(0, agentsTop + 2);
+  const agentsBody = Math.max(0, agentsTop + 1 + sectionGap);
   const availableRows = Math.max(0, height - 1 - agentsBody);
   const groupCount = grouped ? new Set(agents.map((entry) => deskLane(entry.pane))).size : 0;
   const roomy = availableRows >= agents.length * 5 + groupCount * 2 - 1;
