@@ -9,6 +9,22 @@ import * as notifications from "../src/client/notifications.js";
 import type { ShepherdRequest, StateView } from "../src/types.js";
 
 describe("Shepherd UI", () => {
+  it("clears a custom workspace name to restore automatic naming", async () => {
+    const connection = new FakeConnection(testState());
+    const instance = render(<App connection={connection} />);
+    try {
+      await flushApp();
+      instance.stdin.write("\x02W");
+      await flushApp();
+      expect(instance.lastFrame()).toContain("Leave blank for automatic naming");
+      instance.stdin.write("\x01\x0b");
+      await flushApp();
+      instance.stdin.write("\r");
+      await flushApp();
+      expect(connection.requests).toContainEqual({ type: "workspace.rename", workspaceId: "w1", name: "" });
+    } finally { instance.unmount(); }
+  });
+
   it.each([
     ["2", false], ["2", true], ["3", false], ["3", true],
   ] as const)("refreshes idle pane and chrome colors on appearance changes (level=%s, mobile=%s)", async (level, mobile) => {

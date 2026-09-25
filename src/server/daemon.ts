@@ -65,7 +65,7 @@ import {
 } from "./plugins.js";
 import { managedCheckoutFor } from "./pluginInstall.js";
 import { PluginLifecycleTracker } from "./pluginLifecycle.js";
-import { configuredShell, PaneTerminal, processCwd } from "./terminal.js";
+import { configuredShell, PaneTerminal } from "./terminal.js";
 import os from "node:os";
 import { spawn } from "node:child_process";
 import { SurfaceSubscription } from "./surfaces.js";
@@ -112,6 +112,7 @@ interface RunningTab {
   id: string;
   name: string;
   layout: LayoutNode;
+  rootPaneId?: string;
   focusedPaneId: string;
   zoomedPaneId: string | null;
   /** Most recent first; used to return focus when a pane closes. */
@@ -222,6 +223,8 @@ export class ShepherdDaemon {
   private processTimer: NodeJS.Timeout | null = null;
   private detectingAgents = false;
   private readonly gitStatuses = new Map<string, GitStatusView | null>();
+  private refreshingGit = false;
+  private gitRefreshPending = false;
   private config = loadConfig().config;
   private lastSurfaceFlush = 0;
 
@@ -262,7 +265,10 @@ export class ShepherdDaemon {
     void this.refreshGitStatus();
     this.gitTimer = setInterval(() => void this.refreshGitStatus(), 5_000);
     this.gitTimer.unref?.();
-    this.processTimer = setInterval(() => void this.detectForegroundAgents(), 1_000);
+    this.processTimer = setInterval(() => {
+      for (const pane of this.panes.values()) void pane.refreshCwd();
+      void this.detectForegroundAgents();
+    }, 1_000);
     this.processTimer.unref?.();
     const configuredInterval = Number.parseInt(
       process.env.SHEPHERD_MARKETPLACE_REFRESH_MS ?? "1800000",
@@ -668,10 +674,11 @@ export class ShepherdDaemon {
           ? this.requireWorkspace(message.workspaceId).rootPath
           : message.root ?? process.cwd();
         const worktrees = await listWorktrees(await discoverRepository(base));
+        const checkouts = await this.workspaceCheckoutPaths();
         return worktrees.map((worktree) => ({
           ...worktree,
           openWorkspaceId: this.workspaces.find((workspace) =>
-            canonicalPath(workspace.rootPath) === canonicalPath(worktree.path)
+            checkouts.get(workspace.id) === canonicalPath(worktree.path)
           )?.id ?? null,
         }));
       }
@@ -720,7 +727,7 @@ export class ShepherdDaemon {
           throw new Error(`not a worktree in ${root}: ${message.path}`);
         }
         const state = this.createWorkspace(
-          message.name ?? path.basename(worktree.path),
+          message.name ?? "",
           worktree.path,
         );
         return {
@@ -746,8 +753,9 @@ export class ShepherdDaemon {
         }
         const root = await discoverRepository(message.root);
         const target = canonicalPath(message.path);
+        const checkouts = await this.workspaceCheckoutPaths();
         const open = this.workspaces.find((workspace) =>
-          canonicalPath(workspace.rootPath) === target
+          checkouts.get(workspace.id) === target
         );
         if (open) {
           throw new Error(`close workspace ${open.name || open.id} before removing its worktree`);
@@ -794,7 +802,7 @@ export class ShepherdDaemon {
         return this.stateViewForClient(client);
       case "workspace.rename": {
         const workspace = this.requireWorkspace(message.workspaceId);
-        workspace.name = normalizeName(message.name);
+        workspace.name = message.name.trim() ? normalizeName(message.name) : "";
         this.changed();
         return this.stateViewForClient(client);
       }
@@ -1554,6 +1562,7 @@ export class ShepherdDaemon {
     });
     this.selectWorkspace(this.workspaces[this.workspaces.length - 1]);
     this.changed();
+    void this.refreshGitStatus();
     return this.stateView();
   }
 
@@ -1639,6 +1648,7 @@ export class ShepherdDaemon {
       onExit: () => setImmediate(() => this.handlePaneExit(id)),
       onBell: () => void this.emitEvent("pane.bell", { paneId: id }),
       onChange: () => this.scheduleSurfaceFlush(),
+      onCwdChange: () => { if (!this.stopping) this.changed(); },
       onClipboard: (text) => this.forwardClipboard(id, text),
     });
     this.panes.set(id, pane);
@@ -1882,6 +1892,7 @@ export class ShepherdDaemon {
         onExit: () => setImmediate(() => this.handlePaneExit(saved.id)),
         onBell: () => void this.emitEvent("pane.bell", { paneId: saved.id }),
         onChange: () => this.scheduleSurfaceFlush(),
+        onCwdChange: () => { if (!this.stopping) this.changed(); },
         onClipboard: (text) => this.forwardClipboard(saved.id, text),
       });
       this.panes.set(saved.id, pane);
@@ -1915,24 +1926,64 @@ export class ShepherdDaemon {
     if (changed) this.changed();
   }
 
-  /** Refreshes branch and ahead/behind for each workspace root. */
-  private async refreshGitStatus(): Promise<void> {
+  /** A space may now be in a checkout subdirectory; compare checkout roots. */
+  private async workspaceCheckoutPaths(): Promise<Map<string, string>> {
+    return new Map(await Promise.all(this.workspaces.map(async (workspace) => {
+      const cwd = workspace.rootPath;
+      const checkout = await discoverRepository(cwd).catch(() => cwd);
+      return [workspace.id, canonicalPath(checkout)] as const;
+    })));
+  }
+
+  /** The first tab's root pane supplies the space's directory, as in Herdr. */
+  private syncWorkspaceDirectories(): boolean {
     let changed = false;
     for (const workspace of this.workspaces) {
-      const status = await gitStatus(workspace.rootPath).catch(() => null);
-      const previous = this.gitStatuses.get(workspace.id);
-      if (JSON.stringify(previous ?? null) !== JSON.stringify(status)) {
-        this.gitStatuses.set(workspace.id, status);
-        changed = true;
+      for (const tab of workspace.tabs) {
+        const ids = paneIds(tab.layout);
+        if (!tab.rootPaneId || !ids.includes(tab.rootPaneId)) tab.rootPaneId = ids[0];
       }
+      const rootPaneId = workspace.tabs[0]?.rootPaneId;
+      const cwd = rootPaneId ? this.panes.get(rootPaneId)?.currentCwd : undefined;
+      if (!cwd || cwd === workspace.rootPath) continue;
+      workspace.rootPath = cwd;
+      this.gitStatuses.delete(workspace.id);
+      changed = true;
     }
-    if (changed) this.changed();
+    return changed;
+  }
+
+  /** Refresh outside state/render paths, discarding results for old directories. */
+  private async refreshGitStatus(): Promise<void> {
+    if (this.refreshingGit) {
+      this.gitRefreshPending = true;
+      return;
+    }
+    this.refreshingGit = true;
+    try {
+      do {
+        this.gitRefreshPending = false;
+        let changed = this.syncWorkspaceDirectories();
+        for (const workspace of [...this.workspaces]) {
+          const cwd = workspace.rootPath;
+          const status = await gitStatus(cwd).catch(() => null);
+          if (this.stopping) return;
+          if (!this.workspaces.includes(workspace) || workspace.rootPath !== cwd) continue;
+          const previous = this.gitStatuses.get(workspace.id);
+          this.gitStatuses.set(workspace.id, status);
+          if (JSON.stringify(previous ?? null) !== JSON.stringify(status)) changed = true;
+        }
+        if (changed) this.changed();
+      } while (this.gitRefreshPending && !this.stopping);
+    } finally {
+      this.refreshingGit = false;
+    }
   }
 
   private workspaceLabel(workspace: RunningWorkspace): string {
     if (workspace.name) return workspace.name;
     const git = this.gitStatuses.get(workspace.id);
-    if (git?.repoName) return git.repoName;
+    if (git?.checkoutPath) return path.basename(git.checkoutPath) || git.checkoutPath;
     const home = os.homedir();
     if (path.resolve(workspace.rootPath) === home) return "~";
     return path.basename(workspace.rootPath) || workspace.rootPath;
@@ -2058,8 +2109,7 @@ export class ShepherdDaemon {
     const tab = this.activeTabForClient(client);
     const focused = this.panes.get(tab.focusedPaneId);
     const candidates = [
-      focused?.currentCwd !== focused?.cwd ? focused?.currentCwd : undefined,
-      focused?.processId ? processCwd(focused.processId) : null,
+      focused?.resolveCwd(),
       focused?.cwd,
       workspace.rootPath,
     ];
@@ -3055,6 +3105,7 @@ export class ShepherdDaemon {
         return {
           ...tab,
           layout,
+          rootPaneId: tab.rootPaneId ? idTranslations.get(tab.rootPaneId) : undefined,
           zoomedPaneId: tab.zoomedPaneId
             ? idTranslations.get(tab.zoomedPaneId) ?? null
             : null,
@@ -3134,6 +3185,7 @@ export class ShepherdDaemon {
           id: tab.id,
           name: tab.name,
           layout: tab.layout,
+          rootPaneId: tab.rootPaneId,
           focusedPaneId: tab.focusedPaneId,
           zoomedPaneId: tab.zoomedPaneId,
         })),
@@ -3154,6 +3206,7 @@ export class ShepherdDaemon {
   }
 
   private changed(): void {
+    if (this.syncWorkspaceDirectories()) void this.refreshGitStatus();
     this.stateVersion += 1;
     void this.emitEvent("state.changed", {
       stateVersion: this.stateVersion,

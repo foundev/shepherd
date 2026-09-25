@@ -42,6 +42,7 @@ import {
   sidebarRows,
   tabBarRow,
   targetAt,
+  workspaceLabel,
   type ChromeRow,
   type ClickTarget,
   type Segment,
@@ -534,7 +535,7 @@ export function App({
   const windowTitle = titleOverride ?? (activeWorkspace
     ? renderWindowTitle(config.ui.window_title, {
       hostname: os.hostname().split(".")[0] ?? "",
-      workspace: activeWorkspace.name,
+      workspace: workspaceLabel(activeWorkspace),
       tab: activeTab?.name ?? "",
       pane: focusedPaneView?.title ?? "",
       terminal_title: state ? surfaces[state.focusedPaneId]?.title ?? "" : "",
@@ -806,7 +807,7 @@ export function App({
       const workspace = current.workspaces[workspaceIndex];
       const tab = workspace?.tabs.find((entry) => paneIdsOf(entry.layout).includes(paneId));
       const context = workspace
-        ? `${workspace.name} · ${workspaceIndex + 1}${
+        ? `${workspaceLabel(workspace)} · ${workspaceIndex + 1}${
           workspace.tabs.length > 1 && tab ? ` · ${tab.name}` : ""
         }`
         : "";
@@ -955,7 +956,7 @@ export function App({
           type: "workspace.select",
           workspaceId: workspace.id,
         }),
-        `workspace ${workspace.name}`,
+        `workspace ${workspaceLabel(workspace)}`,
       );
     },
     [connection, runAction, state],
@@ -965,7 +966,7 @@ export function App({
     if (!state || !renameMode) return;
     const value = renameDraft.trim();
     if (
-      !value && renameMode !== "new-tab" && renameMode !== "new-workspace"
+      !value && renameMode !== "new-tab" && renameMode !== "new-workspace" && renameMode !== "workspace"
     ) {
       setRenameMode(null);
       return;
@@ -1615,9 +1616,10 @@ export function App({
           : drag.kind === "workspace" && x < screen.sidebar.width
             ? targetAt(sidebarModel[y], x)
             : null;
+        const draggedWorkspace = state.workspaces.find((workspace) => workspace.id === drag.id);
         const title = drag.kind === "tab"
           ? activeWorkspace?.tabs.find((tab) => tab.id === drag.id)?.name ?? drag.id
-          : state.workspaces.find((workspace) => workspace.id === drag.id)?.name ?? drag.id;
+          : draggedWorkspace ? workspaceLabel(draggedWorkspace) : drag.id;
         setDragPreview({
           kind: drag.kind,
           title,
@@ -2930,7 +2932,7 @@ export function App({
       case "close_workspace":
         if (config.ui.confirm_close && activeWorkspace) {
           setConfirm({
-            message: `Close workspace ${activeWorkspace.name} and all its panes?`,
+            message: `Close workspace ${workspaceLabel(activeWorkspace)} and all its panes?`,
             onConfirm: closeActiveWorkspace,
           });
         } else {
@@ -3498,6 +3500,7 @@ export function App({
               {RENAME_TITLES[renameMode]}
             </Text>
             <FieldText field={renameField} />
+            {renameMode === "workspace" && <Text color={theme.muted}>Leave blank for automatic naming</Text>}
             <Text color={theme.muted}>Enter save · Esc cancel</Text>
           </Box>
         </Box>
