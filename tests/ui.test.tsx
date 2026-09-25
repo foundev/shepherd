@@ -746,6 +746,45 @@ describe("Shepherd UI", () => {
     instance.unmount();
   });
 
+  it.each(["blocked", "done"] as const)("delivers %s alerts after a slow state refresh", async (status) => {
+    const state = testState();
+    state.workspaces[0]!.tabs[0]!.zoomedPaneId = "p1";
+    state.focusedPaneId = "p1";
+    state.panes[1]!.status = "working";
+    const connection = new FakeConnection(state);
+    const config = defaultLoadedConfig();
+    config.config.ui.toast.delay_seconds = 0;
+    config.config.ui.sound.enabled = false;
+    const instance = render(<App connection={connection} config={config} />);
+    const request = connection.request.bind(connection);
+    let release: (() => void) | undefined;
+    try {
+      await flushApp();
+      const refresh = new Promise<void>((resolve) => { release = resolve; });
+      vi.spyOn(connection, "request").mockImplementation(async (message) => {
+        const response = request(message);
+        if (message.type === "state.get") await refresh;
+        return response;
+      });
+      state.panes[1]!.status = status;
+      connection.eventHandler?.({
+        event: "agent.status.changed",
+        data: { paneId: "p2", agent: "claude", previous: "working", status },
+        emittedAt: "",
+      });
+      // Delivery becomes due before the new status reaches the UI.
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      await flushApp();
+      const title = status === "blocked" ? "claude needs attention" : "claude ready for review";
+      expect(instance.lastFrame()).not.toContain(title);
+      release!();
+      await vi.waitFor(() => expect(instance.lastFrame()).toContain(title));
+    } finally {
+      release?.();
+      instance.unmount();
+    }
+  });
+
   it.each([
     { focused: true, position: "bar" as const },
     { focused: false, position: "bar" as const },

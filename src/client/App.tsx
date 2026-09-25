@@ -756,18 +756,27 @@ export function App({
   };
 
   const lastAgentStatus = useRef(new Map<string, AgentStatus>());
-  const pendingNotifications = useRef(new Map<string, NodeJS.Timeout>());
+  const pendingNotifications = useRef(new Map<string, {
+    timer: NodeJS.Timeout;
+    ready: boolean;
+    deliver: () => void;
+  }>());
   useEffect(() => () => {
-    for (const timer of pendingNotifications.current.values()) clearTimeout(timer);
+    for (const pending of pendingNotifications.current.values()) clearTimeout(pending.timer);
     pendingNotifications.current.clear();
   }, []);
+  useEffect(() => {
+    for (const pending of pendingNotifications.current.values()) {
+      if (pending.ready) pending.deliver();
+    }
+  }, [state]);
   agentEventRef.current = (data) => {
     const paneId = typeof data.paneId === "string" ? data.paneId : "";
     const status = data.status as AgentStatus;
     const previous = (data.previous as AgentStatus | undefined) ??
       lastAgentStatus.current.get(paneId);
     lastAgentStatus.current.set(paneId, status);
-    clearTimeout(pendingNotifications.current.get(paneId));
+    clearTimeout(pendingNotifications.current.get(paneId)?.timer);
     pendingNotifications.current.delete(paneId);
     setToasts((current) => {
       const remaining = current.filter((entry) => entry.paneId !== paneId || entry.status === status);
@@ -775,10 +784,18 @@ export function App({
     });
     const agent = typeof data.agent === "string" ? data.agent : "agent";
     const deliver = () => {
-      pendingNotifications.current.delete(paneId);
       const current = stateRef.current;
-      const pane = current?.panes.find((entry) => entry.id === paneId);
-      if (!current || !pane || pane.status !== status) return;
+      if (!current) return;
+      const pane = current.panes.find((entry) => entry.id === paneId);
+      if (!pane) {
+        pendingNotifications.current.delete(paneId);
+        return;
+      }
+      // The status event can arrive before state.get completes or React
+      // renders its response. Keep a due alert until that state is visible;
+      // a newer event cancels it above if the status changes again.
+      if (pane.status !== status) return;
+      pendingNotifications.current.delete(paneId);
       const visible = visiblePaneIds.current.includes(paneId);
       const suppressed = visible && hostFocused.current;
       const decision = decideNotification(previous, status, suppressed);
@@ -803,7 +820,15 @@ export function App({
       });
     };
     if (decideNotification(previous, status, false).toast) {
-      pendingNotifications.current.set(paneId, setTimeout(deliver, config.ui.toast.delay_seconds * 1_000));
+      const pending = {
+        ready: false,
+        deliver,
+        timer: setTimeout(() => {
+          pending.ready = true;
+          deliver();
+        }, config.ui.toast.delay_seconds * 1_000),
+      };
+      pendingNotifications.current.set(paneId, pending);
     }
   };
 
