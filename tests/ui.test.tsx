@@ -1,8 +1,9 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { render } from "ink-testing-library";
 import React from "react";
 import { App } from "../src/client/App.js";
 import { defaultLoadedConfig } from "../src/config/model.js";
+import * as notifications from "../src/client/notifications.js";
 import type { ShepherdRequest, StateView } from "../src/types.js";
 
 describe("Shepherd UI", () => {
@@ -671,8 +672,10 @@ describe("Shepherd UI", () => {
     await flushApp();
     expect(instance.lastFrame() ?? "").not.toContain("needs attention");
 
-    // Focus moves away from the terminal: the completion is announced.
-    instance.stdin.write("\x1b[O");
+    // Hide the agent behind a zoomed shell: the completion is announced.
+    state.workspaces[0]!.tabs[0]!.zoomedPaneId = "p1";
+    state.focusedPaneId = "p1";
+    connection.eventHandler?.({ event: "state.changed", data: {}, emittedAt: "" });
     await flushApp();
     setStatus("done", "blocked");
     await flushApp();
@@ -681,6 +684,11 @@ describe("Shepherd UI", () => {
     const frame = instance.lastFrame() ?? "";
     expect(frame).toContain("claude ready for review");
     expect(frame).toContain("production · 1");
+    expect(frame.split("\n")[0]).toContain("claude ready for review");
+    expect(frame).toContain("alpha");
+    instance.stdin.write("hello");
+    await flushApp();
+    expect(connection.requests).toContainEqual({ type: "pane.input", paneId: "p1", data: "hello" });
 
     // prefix+o jumps to the pane that notified.
     instance.stdin.write("\x02");
@@ -689,6 +697,188 @@ describe("Shepherd UI", () => {
     await flushApp();
     expect(connection.requests).toContainEqual({ type: "pane.focus", paneId: "p2" });
     instance.unmount();
+  });
+
+  it.each([
+    { focused: true, position: "bar" as const },
+    { focused: false, position: "bar" as const },
+    { focused: false, position: "bottom-right" as const },
+  ])("keeps a single visible Codex pane quiet ($focused, $position)", async ({ focused, position }) => {
+    const state = testState();
+    state.panes = [{ ...state.panes[1]!, agent: "codex", title: "codex", status: "working" }];
+    state.workspaces[0]!.tabs[0]!.layout = { kind: "pane", paneId: "p2" };
+    const connection = new FakeConnection(state);
+    const config = defaultLoadedConfig();
+    config.config.ui.toast.delay_seconds = 0;
+    config.config.ui.toast.position = position;
+    const sound = vi.spyOn(notifications, "playSound").mockImplementation(() => {});
+    const instance = render(<App connection={connection} config={config} />);
+    try {
+      await flushApp();
+      if (!focused) instance.stdin.write("\x1b[O");
+      await flushApp();
+      state.panes[0]!.status = "blocked";
+      connection.eventHandler?.({
+        event: "agent.status.changed",
+        data: { paneId: "p2", agent: "codex", previous: "working", status: "blocked" },
+        emittedAt: "",
+      });
+      await new Promise((resolve) => setTimeout(resolve, 30));
+      await flushApp();
+      expect(instance.frames.join("\n")).not.toContain("codex needs attention");
+      expect(instance.lastFrame()).toContain("hello agent");
+      expect(sound).not.toHaveBeenCalled();
+    } finally {
+      instance.unmount();
+      sound.mockRestore();
+    }
+  });
+
+  it("checks current visibility before delivering a delayed alert and dismisses it when seen", async () => {
+    const state = testState();
+    state.workspaces[0]!.tabs[0]!.zoomedPaneId = "p1";
+    state.focusedPaneId = "p1";
+    const connection = new FakeConnection(state);
+    const config = defaultLoadedConfig();
+    config.config.ui.toast.delay_seconds = 0.1;
+    config.config.ui.sound.enabled = false;
+    const instance = render(<App connection={connection} config={config} />);
+    const status = () => connection.eventHandler?.({
+      event: "agent.status.changed",
+      data: { paneId: "p2", agent: "codex", previous: "working", status: "blocked" },
+      emittedAt: "",
+    });
+    const zoom = async (paneId: string) => {
+      state.workspaces[0]!.tabs[0]!.zoomedPaneId = paneId;
+      state.focusedPaneId = paneId;
+      connection.eventHandler?.({ event: "state.changed", data: {}, emittedAt: "" });
+      await flushApp();
+    };
+    try {
+      await flushApp();
+      status();
+      await flushApp();
+      await zoom("p2");
+      await new Promise((resolve) => setTimeout(resolve, 150));
+      await flushApp();
+      expect(instance.frames.join("\n")).not.toContain("codex needs attention");
+
+      await zoom("p1");
+      status();
+      await new Promise((resolve) => setTimeout(resolve, 150));
+      await flushApp();
+      expect(instance.lastFrame()).toContain("codex needs attention");
+      await zoom("p2");
+      expect(instance.lastFrame()).not.toContain("codex needs attention");
+      await zoom("p1");
+      expect(instance.lastFrame()).not.toContain("codex needs attention");
+    } finally { instance.unmount(); }
+  });
+
+  it.each(["top", "bottom", "mobile", "sidebar", "hidden"])("keeps background alerts to one line (%s chrome)", async (layout) => {
+    const state = testState();
+    state.workspaces[0]!.tabs[0]!.zoomedPaneId = "p1";
+    state.focusedPaneId = "p1";
+    const connection = new FakeConnection(state);
+    const config = defaultLoadedConfig();
+    config.config.ui.toast.delay_seconds = 0;
+    config.config.ui.sound.enabled = false;
+    config.config.ui.tab_bar_position = layout === "bottom" ? "bottom" : "top";
+    config.config.ui.mobile_width_threshold = layout === "mobile" ? 100 : 0;
+    config.config.ui.hide_tab_bar_when_single_tab = layout === "sidebar" || layout === "hidden";
+    config.config.ui.sidebar_start_collapsed = layout === "hidden";
+    config.config.ui.sidebar_collapsed_mode = "hidden";
+    const instance = render(<App connection={connection} config={config} />);
+    try {
+      await flushApp();
+      const before = (instance.lastFrame() ?? "").split("\n");
+      connection.eventHandler?.({
+        event: "agent.status.changed",
+        data: { paneId: "p2", agent: "codex", previous: "working", status: "blocked" }, emittedAt: "",
+      });
+      await new Promise((resolve) => setTimeout(resolve, 30));
+      await flushApp();
+      const after = (instance.lastFrame() ?? "").split("\n");
+      const row = layout === "bottom" || layout === "sidebar" ? after.length - 1
+        : layout === "mobile" ? 1 : 0;
+      expect(after[row]).toContain("codex needs attention");
+      expect(after.filter((_, index) => index !== row)).toEqual(before.filter((_, index) => index !== row));
+      if (layout === "mobile") expect(after[row]).toContain("switch");
+      const col = after[row]!.indexOf("codex needs attention") + 1;
+      instance.stdin.write(`\x1b[<0;${col};${row + 1}M`);
+      await flushApp();
+      expect(connection.requests).toContainEqual({ type: "pane.focus", paneId: "p2" });
+      expect(instance.lastFrame()).not.toContain("codex needs attention");
+    } finally { instance.unmount(); }
+  });
+
+  it("cancels superseded status alerts instead of delivering duplicates", async () => {
+    const state = testState();
+    state.workspaces[0]!.tabs[0]!.zoomedPaneId = "p1";
+    state.focusedPaneId = "p1";
+    const connection = new FakeConnection(state);
+    const config = defaultLoadedConfig();
+    config.config.ui.toast.delay_seconds = 0.05;
+    const sound = vi.spyOn(notifications, "playSound").mockImplementation(() => {});
+    const instance = render(<App connection={connection} config={config} />);
+    const report = async (status: "blocked" | "working", previous: string) => {
+      state.panes[1]!.status = status;
+      connection.eventHandler?.({
+        event: "agent.status.changed",
+        data: { paneId: "p2", agent: "codex", previous, status }, emittedAt: "",
+      });
+      await flushApp();
+    };
+    try {
+      await flushApp();
+      await report("blocked", "working");
+      await report("working", "blocked");
+      await report("blocked", "working");
+      await new Promise((resolve) => setTimeout(resolve, 100));
+      await flushApp();
+      expect(sound).toHaveBeenCalledTimes(1);
+      expect(instance.lastFrame()).toContain("codex needs attention");
+      await report("working", "blocked");
+      expect(instance.lastFrame()).not.toContain("codex needs attention");
+    } finally {
+      instance.unmount();
+      sound.mockRestore();
+    }
+  });
+
+  it("still delivers native alerts while away and treats typing as renewed focus", async () => {
+    const state = testState();
+    const connection = new FakeConnection(state);
+    const config = defaultLoadedConfig();
+    config.config.ui.toast.delivery = "system";
+    config.config.ui.toast.delay_seconds = 0;
+    config.config.ui.sound.enabled = false;
+    const system = vi.spyOn(notifications, "systemNotification").mockImplementation(() => {});
+    const instance = render(<App connection={connection} config={config} />);
+    const report = async (status: "blocked" | "done", previous: string) => {
+      state.panes[1]!.status = status;
+      connection.eventHandler?.({
+        event: "agent.status.changed",
+        data: { paneId: "p2", agent: "codex", previous, status }, emittedAt: "",
+      });
+      await new Promise((resolve) => setTimeout(resolve, 30));
+      await flushApp();
+    };
+    try {
+      await flushApp();
+      instance.stdin.write("\x1b[O");
+      await flushApp();
+      await report("blocked", "working");
+      expect(system).toHaveBeenCalledTimes(1);
+      expect(system).toHaveBeenCalledWith("codex needs attention", "production · 1");
+      instance.stdin.write("x");
+      await flushApp();
+      await report("done", "blocked");
+      expect(system).toHaveBeenCalledTimes(1);
+    } finally {
+      instance.unmount();
+      system.mockRestore();
+    }
   });
 
   it("reads and prompts remote agents through the unified UI", async () => {
@@ -958,7 +1148,7 @@ class FakeConnection {
   request(request: ShepherdRequest): Promise<unknown> {
     this.requests.push(request);
     if (request.type === "state.get") {
-      return Promise.resolve(this.state);
+      return Promise.resolve(structuredClone(this.state));
     }
     if (request.type === "pane.text") {
       const lines = request.paneId === "p1"

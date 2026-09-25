@@ -165,16 +165,18 @@ ${keyLines()}
 # Accent color for highlights, borders, and navigation UI. Empty uses the theme's.
 # accent = ${toml(d.ui.accent)}
 
-# Background notification popup delivery
+# Background notification delivery (visible panes never get in-app alerts)
 [ui.toast]
 # off = disable pop-up notifications
-# shepherd = show in-app toasts
+# shepherd = show in-app alerts
 # terminal = ask the outer terminal to show a desktop notification
 # system = ask the OS notification service directly
 # delivery = ${toml(d.ui.toast.delivery)}
 # delay_seconds = ${d.ui.toast.delay_seconds}
 
 [ui.toast.shepherd]
+# bar = one line in the tab bar, mobile header, or sidebar footer
+# With all chrome hidden, bar uses a single line at the top of the screen.
 # top-left, top-right, bottom-left, bottom-right, top-center, bottom-center
 # position = ${toml(d.ui.toast.position)}
 

@@ -67,6 +67,16 @@ describe("key syntax", () => {
 });
 
 describe("config", () => {
+  it("defaults notifications to the bar and accepts explicit corner positions", () => {
+    expect(parseConfig({}).ui.toast.position).toBe("bar");
+    for (const position of ["bar", "bottom-right"]) {
+      const diagnostics: string[] = [];
+      const config = parseConfig({ ui: { toast: { shepherd: { position } } } }, diagnostics);
+      expect(config.ui.toast.position).toBe(position);
+      expect(diagnostics).toEqual([]);
+    }
+  });
+
   it("applies overrides and reports invalid values", () => {
     const diagnostics: string[] = [];
     const config = parseConfig({

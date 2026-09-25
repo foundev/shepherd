@@ -2,6 +2,7 @@ import { Box, Text } from "ink";
 import { theme } from "./theme.js";
 import type { Action, Keymap } from "../config/keybinds.js";
 import type { ToastPosition } from "../config/model.js";
+import type { AgentStatus, Rect } from "../types.js";
 
 export interface ToastEntry {
   id: string;
@@ -9,24 +10,56 @@ export interface ToastEntry {
   context: string;
   tone: "attention" | "done" | "clipboard";
   position: ToastPosition;
+  paneId?: string;
+  status?: AgentStatus;
 }
 
-/** Floating toasts in their configured corner; the newest is last. */
+/** A compact notification in existing chrome; explicit corner positions
+ * retain their floating cards. */
 export function ToastStack({
   toasts,
   columns,
   rows,
+  barRect,
+  openLabel,
 }: {
   toasts: ToastEntry[];
   columns: number;
   rows: number;
+  barRect: Rect;
+  openLabel?: string;
 }) {
   const width = Math.min(44, Math.max(20, columns - 4));
+  const floating = toasts.filter((toast) => toast.position !== "bar");
+  const barToasts = toasts.filter((toast) => toast.position === "bar");
+  const latest = barToasts.at(-1);
   return (
     <>
-      {toasts.map((toast, index) => {
+      {latest && (
+        <Box
+          position="absolute"
+          marginLeft={barRect.x}
+          marginTop={barRect.y}
+          width={barRect.width}
+          height={1}
+          backgroundColor={theme.panelBg}
+        >
+          <Text wrap="truncate-end">
+            <Text color={latest.tone === "attention" ? theme.danger : theme.success}>
+              {` ${latest.tone === "attention" ? "!" : "✓"} `}
+            </Text>
+            <Text color={theme.text}>{latest.title}</Text>
+            <Text color={theme.muted}>
+              {latest.context ? ` · ${latest.context}` : ""}
+              {barToasts.length > 1 ? ` · +${barToasts.length - 1}` : ""}
+              {latest.paneId && openLabel ? ` · ${openLabel} open` : ""}
+            </Text>
+          </Text>
+        </Box>
+      )}
+      {floating.map((toast, index) => {
         const height = toast.context ? 4 : 3;
-        const fromBottom = toasts.length - index;
+        const fromBottom = floating.length - index;
         const top = toast.position.startsWith("top")
           ? 1 + index * height
           : Math.max(0, rows - 1 - fromBottom * height);

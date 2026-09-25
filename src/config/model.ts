@@ -14,6 +14,7 @@ import {
 import { defaultSidebarConfig, parseSidebarConfig, type SidebarConfig } from "./sidebar.js";
 
 export type ToastPosition =
+  | "bar"
   | "top-left"
   | "top-right"
   | "bottom-left"
@@ -22,6 +23,7 @@ export type ToastPosition =
   | "bottom-center";
 
 const TOAST_POSITIONS: ToastPosition[] = [
+  "bar",
   "top-left",
   "top-right",
   "bottom-left",
@@ -194,12 +196,11 @@ export const DEFAULT_CONFIG: ShepherdConfig = {
     sidebar: defaultSidebarConfig(),
     agent_panel_sort: "status",
     accent: "",
-    // Enable Shepherd toasts by default.
-    // yet, so in-app toasts are on by default.
+    // Keep agent alerts in the chrome, clear of terminal prompts.
     toast: {
       delivery: "shepherd",
       delay_seconds: 1,
-      position: "bottom-right",
+      position: "bar",
       clipboard_enabled: true,
       clipboard_position: "bottom-center",
     },

@@ -183,6 +183,14 @@ Ctrl+B ?      shortcut reminder
 
 In terminal mode, unbound keys—including Ctrl+C—are forwarded to the focused PTY.
 
+Agent alerts never pop up over their own visible terminal. Background alerts
+default to a single line in the tab bar (or mobile header/sidebar footer),
+leaving the prompt clear. Click an alert or use `Ctrl+B o` to open its pane;
+viewing the pane clears its alert. `[ui.toast.shepherd] position = "bar"`
+selects this layout; explicit corner positions remain available. With both
+the tab bar and sidebar hidden, the alert uses one line at the top of the screen.
+Desktop notification delivery remains available while the host terminal is unfocused.
+
 ## Supervising agents
 
 Toggle the sidebar agent panel between workspaces (`spaces`) and attention
