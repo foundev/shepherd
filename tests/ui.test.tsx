@@ -2,11 +2,58 @@ import { describe, expect, it, vi } from "vitest";
 import { render } from "ink-testing-library";
 import React from "react";
 import { App } from "../src/client/App.js";
+import { configureTerminalColors } from "../src/client/colors.js";
+import { applyTheme } from "../src/client/theme.js";
 import { defaultLoadedConfig } from "../src/config/model.js";
 import * as notifications from "../src/client/notifications.js";
 import type { ShepherdRequest, StateView } from "../src/types.js";
 
 describe("Shepherd UI", () => {
+  it.each([
+    ["2", false], ["2", true], ["3", false], ["3", true],
+  ] as const)("refreshes idle pane and chrome colors on appearance changes (level=%s, mobile=%s)", async (level, mobile) => {
+    const restore = configureTerminalColors({ isTTY: true }, { FORCE_COLOR: level });
+    const darkBg = level === "2" ? "\x1b[48;5;234m" : "\x1b[48;2;16;23;34m";
+    const darkSidebar = level === "2" ? "\x1b[48;5;233m" : "\x1b[48;2;11;17;27m";
+    const darkFg = level === "2" ? "\x1b[38;5;255m" : "\x1b[38;2;233;240;242m";
+    const lightBg = level === "2" ? "\x1b[48;5;231m" : "\x1b[48;2;248;250;248m";
+    const lightFg = level === "2" ? "\x1b[38;5;235m" : "\x1b[38;2;25;48;46m";
+    const config = defaultLoadedConfig();
+    config.config.theme.auto_switch = true;
+    config.config.ui.mobile_width_threshold = mobile ? 100 : 0;
+    const instance = render(<App connection={new FakeConnection(testState())} config={config} />);
+    try {
+      await flushApp();
+      expect(instance.lastFrame()).toContain(darkBg);
+      instance.stdin.write("\x1b[?997;2n");
+      await flushApp();
+      const light = instance.lastFrame() ?? "";
+      expect(light).toContain(lightBg);
+      expect(light).not.toContain(darkBg);
+      expect(light).not.toContain(darkSidebar);
+      // In 256 colors the light theme's dividers share an index with the
+      // dark theme's text. Check a text label rather than banning the index.
+      expect(light).toContain(`${lightFg}production`);
+      expect(light).not.toContain(`${darkFg}production`);
+
+      if (mobile) {
+        instance.stdin.write("\x02w");
+        await flushApp();
+        expect(instance.lastFrame()).toContain("+ new workspace");
+      }
+      instance.stdin.write("\x1b[?997;1n");
+      await flushApp();
+      const dark = instance.lastFrame() ?? "";
+      expect(dark).toContain(darkBg);
+      expect(dark).not.toContain(lightBg);
+      expect(dark).not.toContain(`${lightFg}production`);
+    } finally {
+      instance.unmount();
+      restore();
+      applyTheme("shepherd");
+    }
+  });
+
   it("pages and scrolls overflow agents without sending wheel input to a pane", async () => {
     const state = { ...testState(), machines: [] };
     const workspace = state.workspaces[0]!;

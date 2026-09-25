@@ -545,6 +545,8 @@ export function App({
   }, [stdout, windowTitle]);
 
   useEffect(() => setAgentScroll(undefined), [state?.focusedPaneId, agentSort]);
+  // These row models capture theme colors. Invalidate them on config and
+  // host appearance changes even when the underlying pane state is idle.
   const sidebarModel = useMemo(() => state
     ? sidebarRows(state, {
       width: screen.sidebar.width,
@@ -565,11 +567,12 @@ export function App({
       sidebar: config.ui.sidebar,
     })
     : [], [
+      appearance,
       agentSort,
       agentScroll,
       collapsedGroups,
       collapsedMachines,
-      config.ui,
+      config,
       mode,
       navigateIndex,
       remoteDashboardOpen,
@@ -608,7 +611,7 @@ export function App({
       height: screen.header.height,
       indicators: config.ui.status_indicators,
     })
-    : [], [config.ui.status_indicators, screen.header, state]);
+    : [], [appearance, config, screen.header, state]);
   const switcherOpen = screen.mobile && mode === "navigate";
   const switcherDoc = useMemo(() => state && switcherOpen
     ? switcherDocument(state, {
@@ -618,7 +621,7 @@ export function App({
       navigateWorkspaceId: state.workspaces[navigateIndex]?.id ?? null,
       menu: GLOBAL_MENU.map((entry) => entry.label),
     })
-    : null, [agentSort, config.ui.status_indicators, navigateIndex, screen.columns, state, switcherOpen]);
+    : null, [agentSort, appearance, config, navigateIndex, screen.columns, state, switcherOpen]);
   const switcher = useMemo(() => switcherDoc
     ? switcherScreen(switcherDoc, {
       width: screen.columns,

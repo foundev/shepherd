@@ -64,6 +64,30 @@ afterEach(() => {
 });
 
 describe("pane terminal", () => {
+  it.each(["history", "handoff"])("keeps backgrounds and inverse spaces through snapshots and %s replay", async (source) => {
+    const target = pane(
+      "printf 'label\\033[44m\\033[K\\033[0m\\r\\n" +
+      "\\033[42m    \\033[0m\\r\\n" +
+      "\\033[7m    \\033[0m'; sleep 5",
+    );
+    await screenContaining(target, "label");
+    const lines = target.snapshot(3);
+    expect(lines[0]).toContainEqual(expect.objectContaining({
+      text: " ".repeat(target.cols - 5), backgroundColor: "blue",
+    }));
+    expect(lines[1]).toContainEqual(expect.objectContaining({ text: "    ", backgroundColor: "green" }));
+    expect(lines[2]).toContainEqual(expect.objectContaining({ text: "    ", inverse: true }));
+    const replay = source === "history" ? target.historyAnsi() : target.handoffState()?.replay;
+    expect(replay).toBeTruthy();
+    const restored = new PaneTerminal({
+      id: "restored-backgrounds", title: "restored", cwd: os.tmpdir(),
+      command: "sleep 5", replay: replay!,
+    });
+    panes.push(restored);
+    await screenContaining(restored, "label");
+    expect(restored.snapshot(3)).toEqual(lines);
+  });
+
   it("preserves shell palette colors, bold, and explicit RGB through history replay", async () => {
     const colors = [
       "black", "red", "green", "yellow", "blue", "magenta", "cyan", "white",
