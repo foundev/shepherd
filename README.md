@@ -57,7 +57,7 @@ Implemented:
 - agent detection for 23 agents, with reported or inferred status evidence and explicit uncertainty
 - a sidebar agent panel grouped by space or by attention status, with persistent task context
 - persistent task summaries, blockers, next actions, check results, and explicit review acknowledgement
-- Claude lifecycle hooks that capture prompts, permission requests, and response summaries
+- Claude and Muse lifecycle hooks that capture prompts, permission requests, and response summaries
 - agent get/read/wait/prompt automation
 - runtime event subscriptions and event waits
 - agent status-change events with blocked/done terminal notifications
@@ -236,6 +236,38 @@ and capture response summaries for review. It ignores subagent events and
 does not approve permissions or infer test results. Reinstall older hooks and
 restart Claude to load the updated configuration. Prompts and summaries are
 stored as task context in Shepherd's session state and rolling snapshots.
+
+Install the Muse Code integration and launch its terminal UI in a pane:
+
+```bash
+shepherd integration install muse
+shepherd pane run --no-focus "muse"
+shepherd agent list
+shepherd agent send muse "Summarize this repository"
+```
+
+Muse keeps its native interface and permission controls. Shepherd uses Muse's
+[documented lifecycle hooks](https://meta-models.github.io/muse-code-sdk/next/guides/extend/hooks/)
+to report activity, permission requests, questions, failures, task prompts,
+and response summaries. Retained sessions resume with `muse resume <session-id>`
+after a daemon restart; sessions using `--no-session-log` cannot resume.
+Use a pane id instead of `muse` when several Muse agents are running.
+
+Muse clears the environment of ordinary hooks. The installer therefore adds
+hooks to its managed hook file and forwards only `SHEPHERD_ENV`,
+`SHEPHERD_SOCKET_PATH`, and `SHEPHERD_PANE_ID` through `managed_hooks_env_vars`.
+It preserves existing settings and hooks in
+`$XDG_CONFIG_HOME/muse/settings.json` (default `~/.config/muse/settings.json`).
+An existing managed file must use Muse's documented matcher-group format;
+the older strict `name`/`timeout_ms` format is left unchanged with an error.
+Start a new Muse session after installation. Remove the integration with
+`shepherd integration uninstall muse`.
+
+Verified with Muse Code 1.4.0. Hooks report lifecycle observations and use the
+same two-minute status lease described above. A `Stop` hook requests review;
+it does not establish that checks passed, and further model activity returns
+the agent to working. The SDK (`@muse-code/sdk`) owns a separate `muse serve`
+host, so this integration uses CLI hooks to preserve the terminal workflow.
 
 Other integrations can report through the CLI or typed socket API:
 

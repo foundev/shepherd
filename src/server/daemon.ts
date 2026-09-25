@@ -1131,7 +1131,9 @@ export class ShepherdDaemon {
       case "pane.release_agent": {
         // Drop the hook's authority and the agent it reported; the process
         // probe finds the agent again if it is still running.
-        const detector = this.requirePane(message.paneId).detector;
+        const pane = this.requirePane(message.paneId);
+        pane.agentSession = null;
+        const detector = pane.detector;
         detector.releaseHook();
         detector.setAgent(null, Date.now());
         this.publishAgentStatuses();
@@ -3022,7 +3024,9 @@ export class ShepherdDaemon {
         : null;
       const pane = this.spawnPane({
         title: savedPane.title,
-        command: savedPane.completed ? null : savedPane.command,
+        // A resume is sent to a fresh shell below. Launching the original
+        // agent first would feed the resume command into its prompt instead.
+        command: savedPane.completed || resume ? null : savedPane.command,
         // A resumed agent session replaces the saved screen, as in Shepherd.
         replay: resume ? undefined : history?.panes[savedPane.id],
         cwd: available ? savedPane.cwd : os.homedir(),
