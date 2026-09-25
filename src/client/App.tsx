@@ -120,7 +120,7 @@ import {
   type CopyPosition,
 } from "./copyMode.js";
 import { applyTheme, theme } from "./theme.js";
-import { useAgentPulse } from "./useAgentPulse.js";
+import { AnimatedIndicator } from "./indicators.js";
 import type {
   AgentStatus,
   EventFrame,
@@ -586,7 +586,6 @@ export function App({
     config.ui.tab_bar_right_separator,
     Boolean(activeTab?.zoomedPaneId),
   );
-  const agentPulse = useAgentPulse(state);
   const tabBarModel = useMemo(() => state && activeWorkspace && screen.tabBar
     ? tabBarRow(activeWorkspace.tabs, {
       width: screen.tabBar.width,
@@ -596,13 +595,13 @@ export function App({
         .map((tab) => tab.id)),
       mouse: config.ui.mouse_capture,
       right: [
-        ...agentSummarySegments(state, agentPulse),
+        ...agentSummarySegments(state),
         { text: " ", backgroundColor: theme.panelBg },
         ...tabBarStatus,
         { text: " ", backgroundColor: theme.panelBg },
       ],
     })
-    : null, [activeWorkspace, agentPulse, config.ui.mouse_capture, screen.tabBar, state, tabBarStatus]);
+    : null, [activeWorkspace, appearance, config, screen.tabBar, state, tabBarStatus]);
 
   // Phone width: a status header over the panes, and in navigate mode a
   // full-screen switcher in place of the sidebar and tab bar.
@@ -3280,12 +3279,15 @@ export function App({
         height={rows}
         alignItems="center"
         justifyContent="center"
-        borderStyle="round"
-        borderColor={theme.border}
+        flexDirection="column"
+        backgroundColor={theme.background}
       >
-        <Text color={theme.brand} bold>
-          connecting to Shepherd…
-        </Text>
+        <Box flexDirection="column" alignItems="center" paddingX={2} paddingY={1}
+          borderStyle="round" borderColor={theme.borderFocused}>
+          <Text color={theme.panelContrast} backgroundColor={theme.brand} bold> ◆ SHEPHERD </Text>
+          <Text> </Text>
+          <Text color={theme.subtext}><Text color={theme.brand}><AnimatedIndicator text="◐" /></Text> connecting to Shepherd…</Text>
+        </Box>
       </Box>
     );
   }

@@ -25,7 +25,7 @@ export interface ThemePalette {
 
 export const PALETTES: Record<string, ThemePalette> = {
   "shepherd": {
-    accent: "#61d6c0",
+    accent: "#5eead4",
     panel_bg: "#101722",
     sidebar_bg: "#0b111b",
     active_row_bg: "#1c3040",
@@ -37,12 +37,12 @@ export const PALETTES: Record<string, ThemePalette> = {
     overlay1: "#b5c6d2",
     text: "#e9f0f2",
     subtext0: "#b5c6d2",
-    mauve: "#c6a5ee",
-    green: "#8bdcb0",
-    yellow: "#f2c77a",
-    red: "#ff8f96",
+    mauve: "#c6adff",
+    green: "#79e6a5",
+    yellow: "#ffd178",
+    red: "#ff718b",
     blue: "#8fbaf0",
-    teal: "#61d6c0",
+    teal: "#79cfff",
     peach: "#f7b58d",
   },
   "shepherd-day": {

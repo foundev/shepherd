@@ -21,7 +21,7 @@ import {
 } from "./chrome.js";
 import { displayWidth } from "./geometry.js";
 import { sidebarStatusText } from "./sidebarTokens.js";
-import { statusColor, theme } from "./theme.js";
+import { statusBackground, statusColor, statusForeground, theme } from "./theme.js";
 import type { AgentStatus, StateView, WorkspaceView } from "../types.js";
 
 /** Width of the header's switch button and the switcher's close button. */
@@ -53,7 +53,7 @@ function button(label: string, width: number, style: Partial<Segment>): Segment[
     { text: "│", color: theme.surfaceDim, backgroundColor: background, target: style.target },
     {
       text: `${" ".repeat(before)}${truncateText(label, inner)}${" ".repeat(after)}`,
-      color: theme.text,
+      color: theme.brand,
       bold: true,
       backgroundColor: background,
       ...style,
@@ -81,7 +81,7 @@ export function mobileHeaderRows(
     const rollup = workspaceStatus(workspace, state.panes);
     status = rightAligned(
       [
-        { text: ` ${statusIcon(rollup, options.indicators)} `, color: statusColor[rollup] },
+        { text: ` ${statusIcon(rollup, options.indicators)} `, color: statusForeground[rollup], backgroundColor: statusColor[rollup], bold: true },
         { text: workspaceLabel(workspace), color: theme.text, bold: true },
       ],
       [{ text: compactTabStatus(workspace, state.activeTabId), color: theme.overlay1 }],
@@ -101,8 +101,8 @@ export function mobileHeaderRows(
     top[1] = { ...body, text: body.text.slice(0, -1) };
     top.push({
       text: statusIcon("blocked", options.indicators),
-      color: theme.danger,
-      backgroundColor: theme.surface0,
+      color: statusForeground.blocked,
+      backgroundColor: theme.danger,
       target,
     });
   }
@@ -138,6 +138,7 @@ function agentSummary(
     return fit([{ text: " all idle", color: theme.overlay1 }], width);
   }
   const segments: Segment[] = [{ text: " " }];
+  const animateWorking = indicators === "symbols" && !counts.some((entry) => entry.status === "blocked");
   let used = 1;
   for (const [index, { status, count }] of counts.entries()) {
     const separator = index === 0 ? "" : " · ";
@@ -147,9 +148,13 @@ function agentSummary(
       break;
     }
     if (separator) segments.push({ text: separator, color: theme.muted });
-    segments.push(index === 0
-      ? { text, color: statusColor[status], bold: true }
-      : { text, color: theme.overlay1 });
+    segments.push({
+      text,
+      color: index === 0 ? statusForeground[status] : statusColor[status],
+      backgroundColor: index === 0 ? statusColor[status] : statusBackground[status],
+      bold: true,
+      animate: status === "working" && animateWorking,
+    });
     used += displayWidth(separator + text);
   }
   return segments;
@@ -171,7 +176,7 @@ export interface SwitcherDocument {
 }
 
 function section(label: string): ChromeRow {
-  return { segments: [{ text: ` ${label}`, color: theme.overlay1, bold: true }] };
+  return { background: theme.surface0, segments: [{ text: ` ${label}`, color: theme.brand, bold: true }] };
 }
 
 /** Sections top to bottom: machines (with saved machines), agents,
@@ -246,7 +251,9 @@ export function switcherDocument(state: StateView, options: SwitcherOptions): Sw
           { text: "  " },
           {
             text: statusIcon(agent.pane.status, options.indicators),
-            color: statusColor[agent.pane.status],
+            color: statusForeground[agent.pane.status],
+            backgroundColor: statusColor[agent.pane.status],
+            bold: true,
           },
           {
             text: ` ${machinesMode ? "Local · " : ""}${workspaceLabel(agent.workspace)}`,
@@ -287,7 +294,7 @@ export function switcherDocument(state: StateView, options: SwitcherOptions): Sw
       entry(
         [
           { text: `  ${connector}`, color: theme.muted },
-          { text: statusIcon(rollup, options.indicators), color: statusColor[rollup] },
+          { text: statusIcon(rollup, options.indicators), color: statusForeground[rollup], backgroundColor: statusColor[rollup], bold: true },
           { text: ` ${prefix}${entryLabel(space)}`, color: theme.text, bold: true },
         ],
         `${detailPrefix}${workspace.git?.branch || "shell"} · ${compactTabStatus(workspace)}${

@@ -34,10 +34,41 @@ export const theme = {
   sidebarBg: initial.sidebar_bg ?? undefined,
 };
 
-/** Shepherd's agent status colours: blocked red, working yellow, done teal,
+/** Shepherd's agent status colours: blocked coral, working amber, review blue,
  * idle green. */
 export const statusColor: Record<string, string> = {};
 export const statusBackground: Record<string, string> = {};
+/** Legible text on solid status chips, derived before terminal quantization. */
+export const statusForeground: Record<string, string> = {};
+
+function luminance(hex: string): number {
+  const channels = [1, 3, 5].map((offset) => {
+    const value = Number.parseInt(hex.slice(offset, offset + 2), 16) / 255;
+    return value <= 0.04045 ? value / 12.92 : ((value + 0.055) / 1.055) ** 2.4;
+  });
+  return channels[0]! * 0.2126 + channels[1]! * 0.7152 + channels[2]! * 0.0722;
+}
+
+function statusSurface(background: string | null, foreground: string | null): string | null {
+  if (!background?.startsWith("#") || !foreground?.startsWith("#")) return null;
+  const amount = luminance(background) > 0.5 ? 0.1 : 0.16;
+  const channels = [1, 3, 5].map((offset) => {
+    const base = Number.parseInt(background.slice(offset, offset + 2), 16);
+    const accent = Number.parseInt(foreground.slice(offset, offset + 2), 16);
+    return Math.round(base + (accent - base) * amount).toString(16).padStart(2, "0");
+  });
+  return `#${channels.join("")}`;
+}
+
+function chipForeground(color: string): string {
+  // Choose whichever has the higher contrast, including for custom palettes.
+  if (color.startsWith("#")) return luminance(color) > 0.179 ? "#000000" : "#ffffff";
+  // ANSI entries belong to the terminal. Use their conventional dark/bright
+  // identities without replacing the user's palette with fixed RGB values.
+  return ["black", "red", "green", "blue", "magenta", "cyan", "blueBright"].includes(color)
+    ? "white"
+    : "black";
+}
 
 export const THEME_ALIASES: Record<string, string> = {
   dark: "shepherd",
@@ -128,6 +159,20 @@ export function applyTheme(
     palette[key as keyof ThemePalette] = parsed;
   }
 
+  const statusPalette = {
+    blocked: palette.red ?? "red",
+    working: palette.yellow ?? "yellow",
+    done: palette.teal ?? "cyan",
+    idle: palette.green ?? "green",
+    unknown: palette.overlay0 ?? "gray",
+  };
+  for (const [status, foreground] of Object.entries(statusPalette)) {
+    const contrast = chipForeground(foreground);
+    const background = statusSurface(palette.panel_bg, foreground) ?? palette.surface0 ?? contrast;
+    statusBackground[status] = terminalColor(background === foreground ? contrast : background)!;
+    statusForeground[status] = terminalColor(contrast)!;
+  }
+
   for (const key of Object.keys(palette) as Array<keyof ThemePalette>) {
     const value = palette[key];
     if (value !== null) palette[key] = terminalColor(value)!;
@@ -165,14 +210,6 @@ export function applyTheme(
     done: theme.cyan,
     idle: theme.success,
     unknown: theme.muted,
-  });
-  const pill = color(palette.surface0, "gray");
-  Object.assign(statusBackground, {
-    blocked: pill,
-    working: pill,
-    done: pill,
-    idle: pill,
-    unknown: pill,
   });
   return diagnostics;
 }

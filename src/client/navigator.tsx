@@ -11,6 +11,7 @@ import {
 import { displayWidth } from "./geometry.js";
 import { centeredRect, Panel, PanelRows } from "./panels.js";
 import { statusColor, theme } from "./theme.js";
+import { statusBadgeSegments } from "./indicators.js";
 
 export type StatusFilter = "all" | AgentStatus;
 
@@ -127,10 +128,12 @@ export function navigatorRows(
       });
     }
     if (columns >= 2) {
-      right.push({
-        text: (item.agent ? status : "shell").slice(0, 11).padEnd(11),
-        ...(isSelected ? base : { color: statusColor[status] ?? theme.muted }),
-      });
+      if (item.agent) {
+        const badge = statusBadgeSegments(status);
+        right.push(...badge);
+        const used = badge.reduce((sum, segment) => sum + displayWidth(segment.text), 0);
+        if (used < 11) right.push({ text: " ".repeat(11 - used) });
+      } else right.push({ text: "shell".padEnd(11), ...(isSelected ? base : { color: theme.muted }) });
     }
     const rightWidth = right.reduce((sum, segment) => sum + displayWidth(segment.text), 0);
     const prefix = ` ${connector}${current}`;

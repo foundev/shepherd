@@ -14,6 +14,7 @@
     "start": "node bin/shepherd",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run",
+    "preview-ui": "node --import tsx scripts/preview-ui.tsx",
     "bench-render-scale": "tsx scripts/bench-render-scale.tsx"
   },
   "engines": {
