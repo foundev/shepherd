@@ -125,6 +125,66 @@ describe("limited color rendering", () => {
   });
 });
 
+describe("shell colors", () => {
+  it.each(["1", "2", "3"])("uses host ANSI colors and bright bold prompts at color level %s", (level) => {
+    const restore = configureTerminalColors({ isTTY: true }, { FORCE_COLOR: level });
+    try {
+      applyTheme("shepherd");
+      const frame = renderToString(
+        <TerminalPane pane={pane} focused width={40} height={1} bordered={false}
+          lines={[[
+            { text: "user", color: "green", bold: true },
+            { text: ":" },
+            { text: "dir", color: "blue", bold: true },
+            { text: " normal", color: "blue" },
+            { text: " bright", color: "blueBright" },
+            { text: " background", color: "white", backgroundColor: "blue", bold: true },
+          ]]} />,
+        { columns: 40 },
+      );
+      expect(frame).toContain("\x1b[92m");
+      expect(frame).toContain("\x1b[94m");
+      expect(frame).toContain("\x1b[34m");
+      expect(frame).toContain("\x1b[44m");
+      expect(frame).not.toContain("\x1b[104m");
+    } finally {
+      restore();
+      applyTheme("shepherd");
+    }
+  });
+
+  it.each(["shepherd", "shepherd-day", "terminal"])("renders default text with %s and preserves explicit app colors", (name) => {
+    const restore = configureTerminalColors({ isTTY: true }, { FORCE_COLOR: "3" });
+    try {
+      applyTheme(name);
+      const lines = [[{ text: "plain text" }]];
+      const frame = renderToString(
+        <Box backgroundColor={theme.background}>
+          <TerminalPane pane={pane} focused width={20} height={1} bordered={false} lines={lines} />
+        </Box>,
+      );
+      const foreground = PALETTES[name]!.text;
+      expect(frame).toContain("plain text");
+      if (foreground) {
+        const rgb = [1, 3, 5].map((offset) => Number.parseInt(foreground.slice(offset, offset + 2), 16));
+        expect(frame).toContain(`\x1b[38;2;${rgb.join(";")}m`);
+      } else {
+        expect(frame).not.toMatch(/\x1b\[38;/);
+      }
+
+      const rgbFrame = renderToString(
+        <TerminalPane pane={pane} focused width={20} height={1} bordered={false}
+          lines={[[{ text: "app colors", color: "#000080", backgroundColor: "#123456", bold: true }]]} />,
+      );
+      expect(rgbFrame).toContain("\x1b[38;2;0;0;128m");
+      expect(rgbFrame).toContain("\x1b[48;2;18;52;86m");
+    } finally {
+      restore();
+      applyTheme("shepherd");
+    }
+  });
+});
+
 const pane: PaneView = {
   id: "p1", title: "shell", command: null, cwd: "/tmp", agent: null,
   status: "idle", exitCode: null, updatedAt: "2026-09-24T00:00:00Z",

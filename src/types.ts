@@ -39,6 +39,7 @@ export interface TaskChanges {
 
 export interface TerminalSpan {
   text: string;
+  /** Host ANSI palette name, explicit RGB hex, or undefined for the default. */
   color?: string;
   backgroundColor?: string;
   bold?: boolean;

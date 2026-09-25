@@ -90,6 +90,10 @@ Built-in themes are `shepherd`, `shepherd-day`, `aurora`, `ember`, `midnight`,
 `orchid`, `glacier`, `parchment`, and `terminal`. Each supports custom color
 overrides. Use `shepherd config template` for an annotated configuration file.
 
+Pane text uses the theme's default foreground. Standard ANSI colors retain
+your terminal's palette, including bright colors for bold shell prompts and
+directory listings. Applications' explicit RGB colors are preserved.
+
 Windows Terminal is recognized through WSL's `WT_SESSION`, even when
 `COLORTERM` is unset. On 256-color terminals, RGB colors are matched against
 the full fixed palette, including grayscale, so dark surfaces stay dark.

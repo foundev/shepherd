@@ -1,4 +1,5 @@
 import chalk, { type ColorSupportLevel } from "chalk";
+import { ANSI_COLORS } from "../ansiColors.js";
 
 /** Keep palettes lossless until an attached client configures its output. */
 let outputLevel: ColorSupportLevel = 3;
@@ -51,6 +52,13 @@ const EXTENDED_RGB = Array.from({ length: 240 }, (_, offset) => {
   return [CUBE[Math.floor(offset / 36)], CUBE[Math.floor(offset / 6) % 6], CUBE[offset % 6]];
 });
 const cache = new Map<string, string>();
+
+/** Shell prompts commonly use bold base ANSI colors for their bright variants.
+ * Explicit RGB colors and backgrounds must not receive that promotion. */
+export function terminalForegroundColor(color: string | undefined, bold = false): string | undefined {
+  const index = color === undefined ? -1 : ANSI_COLORS.indexOf(color);
+  return terminalColor(bold && index >= 0 && index < 8 ? ANSI_COLORS[index + 8] : color);
+}
 
 /** Select the closest actual palette entry, including the grayscale ramp.
  * Chalk rounds each RGB channel onto an evenly spaced cube, turning dark

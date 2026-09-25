@@ -3421,6 +3421,7 @@ export function App({
                   width={geometry.rect.width}
                   height={geometry.rect.height}
                   lines={surface?.lines ?? EMPTY_LINES}
+                  foregroundColor={theme.text}
                   label={pane.metadataTitle || pane.title ||
                     (config.ui.show_agent_labels_on_pane_borders
                       ? pane.displayAgent || pane.agent || ""
