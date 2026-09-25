@@ -1,6 +1,5 @@
 import { Box, Text } from "ink";
-import { statusBackground, statusColor, theme } from "./theme.js";
-import { StatusBadge } from "./indicators.js";
+import { statusColor, theme } from "./theme.js";
 import type { Action, Keymap } from "../config/keybinds.js";
 import type { ToastPosition } from "../config/model.js";
 import type { AgentStatus, Rect } from "../types.js";
@@ -44,10 +43,10 @@ export function ToastStack({
           marginTop={barRect.y}
           width={barRect.width}
           height={1}
-          backgroundColor={statusBackground[latestStatus]}
+          backgroundColor={theme.surfaceRaised}
         >
           <Text wrap="truncate-end">
-            <StatusBadge status={latestStatus} compact />
+            <Text color={statusColor[latestStatus]} bold>{` ${toastGlyph(latest)} `}</Text>
             <Text color={theme.text} bold>{latest.title}</Text>
             <Text color={theme.subtext}>
               {latest.context ? ` · ${latest.context}` : ""}
@@ -83,19 +82,19 @@ export function ToastStack({
             width={width}
             height={height}
             borderStyle="round"
-            borderColor={color}
+            borderColor={theme.border}
             backgroundColor={theme.panelBg}
             flexDirection="column"
             overflow="hidden"
           >
-            <Box height={1} backgroundColor={statusBackground[status]}>
+            <Box height={1}>
               <Text wrap="truncate-end">
-                <StatusBadge status={status} compact />
-                <Text color={theme.text} bold>{` ${toast.title}`}</Text>
+                <Text color={color} bold>{` ${toastGlyph(toast)} `}</Text>
+                <Text color={theme.text} bold>{toast.title}</Text>
               </Text>
             </Box>
             {toast.context ? (
-              <Text color={theme.subtext} wrap="truncate-end">{`    ${toast.context}`}</Text>
+              <Text color={theme.subtext} wrap="truncate-end">{`   ${toast.context}`}</Text>
             ) : null}
           </Box>
         );
@@ -106,6 +105,11 @@ export function ToastStack({
 
 function toastStatus(toast: ToastEntry): AgentStatus {
   return toast.status ?? (toast.tone === "attention" ? "blocked" : "done");
+}
+
+function toastGlyph(toast: ToastEntry): string {
+  if (toast.tone === "clipboard") return "✓";
+  return { blocked: "!", working: "◐", done: "◇", idle: "○", unknown: "·" }[toastStatus(toast)];
 }
 
 const HELP_GROUPS: Array<{ title: string; actions: Action[] }> = [
@@ -232,13 +236,13 @@ export function HelpOverlay({
       justifyContent="center"
       alignItems="center"
       borderStyle="round"
-      borderColor={theme.brand}
+      borderColor={theme.border}
       backgroundColor={theme.panelBg}
       overflow="hidden"
     >
       <Box flexDirection="column" width={Math.max(1, Math.min(72, width - 4))}>
-        <Box height={1}>
-          <Text color={theme.panelContrast} backgroundColor={theme.brand} bold>{" keybindings "}</Text>
+        <Box height={2}>
+          <Text color={theme.text} bold>{"keybindings"}</Text>
         </Box>
         <Box height={1} backgroundColor={theme.surfaceRaised}>
           <Text color={theme.brand} bold>{" / "}</Text>
@@ -247,12 +251,12 @@ export function HelpOverlay({
           </Text>
         </Box>
         {visible.map((row, index) => row.group ? (
-          <Text key={index} color={theme.purple} bold wrap="truncate-end">{row.group}</Text>
+          <Text key={index} color={theme.subtext} bold wrap="truncate-end">{row.group}</Text>
         ) : (
           <Box key={index} justifyContent="space-between" height={1} overflow="hidden">
             <Text color={theme.text} wrap="truncate-end">  {row.action}</Text>
             <Box flexShrink={0}>
-              <Text color={theme.cyan} backgroundColor={theme.surfaceRaised}>{` ${row.keys} `}</Text>
+              <Text color={theme.subtext}>{` ${row.keys} `}</Text>
             </Box>
           </Box>
         ))}
@@ -281,17 +285,17 @@ export function ConfirmOverlay({
       justifyContent="center"
       alignItems="center"
       borderStyle="round"
-      borderColor={theme.warning}
+      borderColor={theme.border}
       backgroundColor={theme.panelBg}
       overflow="hidden"
     >
       <Box flexDirection="column" gap={1} width={Math.max(1, Math.min(64, width - 4))}>
         <Text color={theme.text} bold>
-          <Text color={theme.panelContrast} backgroundColor={theme.warning}>{" ! "}</Text>{` ${message}`}
+          <Text color={theme.warning}>{"! "}</Text>{message}
         </Text>
         <Text color={theme.subtext} wrap="truncate-end">
-          <Text color={theme.panelContrast} backgroundColor={theme.warning} bold>{" y / Enter "}</Text>
-          {" confirm · "}<Text color={theme.text} backgroundColor={theme.surfaceRaised}>{" n / Esc "}</Text>{" cancel"}
+          <Text color={theme.brand} bold>{"y / Enter"}</Text>
+          {" confirm    "}<Text color={theme.text}>{"n / Esc"}</Text>{" cancel"}
         </Text>
       </Box>
     </Box>

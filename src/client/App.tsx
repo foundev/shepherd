@@ -48,6 +48,7 @@ import {
   type Segment,
 } from "./chrome.js";
 import { ChromeLine, Sidebar } from "./Sidebar.js";
+import { WorkspaceHeader, workspaceHeaderRows, workspaceFooterRow } from "./WorkspaceHeader.js";
 import {
   MOBILE_BUTTON_WIDTH,
   mobileHeaderRows,
@@ -177,6 +178,9 @@ export function App({
       config.ui.accent,
     );
   }, [appearance, config]);
+  // Pane chrome also depends on colors that can change while its terminal
+  // foreground stays fixed (for example, a custom text color in both modes).
+  const paneAppearanceKey = useMemo(() => JSON.stringify(theme), [appearance, config]);
   const [mode, setMode] = useState<Mode>("terminal");
   const [navigateIndex, setNavigateIndex] = useState(0);
   /** Scroll offset of the phone-width switcher's list. */
@@ -336,6 +340,7 @@ export function App({
         ? "none"
         : config.ui.tab_bar_position,
       mobileThreshold: config.ui.mobile_width_threshold,
+      workspaceChrome: true,
     }),
     [activeTabCount, config.ui, screenSize, sidebarCollapsed, sidebarWidth],
   );
@@ -586,6 +591,19 @@ export function App({
     config.ui.tab_bar_right_separator,
     Boolean(activeTab?.zoomedPaneId),
   );
+  const workspaceHeaderModel = useMemo(() => state && screen.workspaceHeader
+    ? workspaceHeaderRows(state, screen.workspaceHeader.width, screen.workspaceHeader.height)
+    : [], [state, screen.workspaceHeader, appearance, config]);
+  const footerModel = useMemo(() => screen.footer ? workspaceFooterRow({
+    width: screen.footer.width,
+    prefix: keymap.prefix,
+    session: state?.session,
+    hints: [
+      { key: (keymap.labels.get("new_tab")?.[0] ?? "").replace(/^prefix\+/, ""), label: "new tab", target: { kind: "new-tab" as const } },
+      { key: (keymap.labels.get("toggle_agent_sort")?.[0] ?? "").replace(/^prefix\+/, ""), label: "group agents", target: { kind: "agent-sort" as const } },
+      { key: (keymap.labels.get("help")?.[0] ?? "").replace(/^prefix\+/, ""), label: "shortcuts" },
+    ].filter((hint) => hint.key),
+  }) : null, [screen.footer, keymap, state?.session, appearance, config]);
   const tabBarModel = useMemo(() => state && activeWorkspace && screen.tabBar
     ? tabBarRow(activeWorkspace.tabs, {
       width: screen.tabBar.width,
@@ -595,13 +613,13 @@ export function App({
         .map((tab) => tab.id)),
       mouse: config.ui.mouse_capture,
       right: [
-        ...agentSummarySegments(state),
+        ...(screen.workspaceHeader ? [] : agentSummarySegments(state)),
         { text: " ", backgroundColor: theme.panelBg },
         ...tabBarStatus,
         { text: " ", backgroundColor: theme.panelBg },
       ],
     })
-    : null, [activeWorkspace, appearance, config, screen.tabBar, state, tabBarStatus]);
+    : null, [activeWorkspace, appearance, config, screen.tabBar, screen.workspaceHeader, state, tabBarStatus]);
 
   // Phone width: a status header over the panes, and in navigate mode a
   // full-screen switcher in place of the sidebar and tab bar.
@@ -1523,6 +1541,18 @@ export function App({
       return;
     }
 
+    if ((event.action === "press" || event.action === "wheel") && x >= screen.main.x) {
+      const inHeader = screen.workspaceHeader && y < screen.workspaceHeader.height;
+      const inFooter = screen.footer && y === screen.footer.y;
+      if (inHeader || inFooter) {
+        if (event.action === "press" && event.button === "left" && mode === "terminal" && !(inFooter && message)) {
+          const row = inHeader ? workspaceHeaderModel[y] : footerModel;
+          handleChromeTarget(targetAt(row ?? undefined, x - screen.main.x));
+        }
+        return;
+      }
+    }
+
     if (event.action === "wheel") {
       const agentViewport = x < screen.sidebar.width - 1 ? sidebarModel[y]?.agentScroll : undefined;
       if (agentViewport) {
@@ -1827,6 +1857,9 @@ export function App({
     copySelection,
     geometries,
     layout.splits,
+    workspaceHeaderModel,
+    footerModel,
+    message,
     mobileHeader,
     mode,
     notificationBar,
@@ -3298,10 +3331,11 @@ export function App({
     <Box flexDirection="row" width={columns} height={rows} backgroundColor={theme.background}>
       <Sidebar rows={sidebarModel} width={screen.sidebar.width} />
       <Box flexDirection="column" width={mainWidth} height={rows}>
+      {screen.workspaceHeader && <WorkspaceHeader state={state} width={mainWidth} height={screen.workspaceHeader.height} />}
       {mobileHeader.map((row, index) => (
         <ChromeLine key={`header-${index}`} row={row} width={mainWidth} />
       ))}
-      {screen.tabBar && screen.tabBar.y === 0 && tabBarModel && (
+      {screen.tabBar && config.ui.tab_bar_position === "top" && tabBarModel && (
         <ChromeLine row={tabBarModel} width={mainWidth} />
       )}
       {remoteDashboardOpen ? (
@@ -3527,6 +3561,8 @@ export function App({
                   height={geometry.rect.height}
                   lines={surface?.lines ?? EMPTY_LINES}
                   foregroundColor={theme.text}
+                  appearanceKey={paneAppearanceKey}
+                  showAgentLabel={config.ui.show_agent_labels_on_pane_borders}
                   label={pane.metadataTitle || pane.title ||
                     (config.ui.show_agent_labels_on_pane_borders
                       ? pane.displayAgent || pane.agent || ""
@@ -3548,9 +3584,10 @@ export function App({
           })}
         </Box>
       )}
-      {screen.tabBar && screen.tabBar.y !== 0 && tabBarModel && (
+      {screen.tabBar && config.ui.tab_bar_position === "bottom" && tabBarModel && (
         <ChromeLine row={tabBarModel} width={mainWidth} />
       )}
+      {footerModel && <ChromeLine row={footerModel} width={mainWidth} />}
       </Box>
 
       {switcher && !overlayOpen && (

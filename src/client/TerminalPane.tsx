@@ -1,10 +1,10 @@
 import { memo } from "react";
 import { Box, Text } from "ink";
-import { theme } from "./theme.js";
+import { statusColor, theme } from "./theme.js";
 import { terminalColor, terminalForegroundColor } from "./colors.js";
 import { displayWidth, type BorderCell, type PaneFrame } from "./geometry.js";
 import { truncateText } from "./chrome.js";
-import { StatusBadge, statusBadgeWidth } from "./indicators.js";
+import { deskLane } from "../agentDesk.js";
 import {
   selectedColumns,
   type TextSelection,
@@ -19,8 +19,12 @@ interface TerminalPaneProps {
   lines: TerminalLine[];
   /** Default text color, passed explicitly so theme changes invalidate memoized rows. */
   foregroundColor?: string;
+  /** Palette identity, so chrome refreshes even when the default text color stays unchanged. */
+  appearanceKey?: string;
   /** Border label; empty for none (labels appear when explicitly set). */
   label?: string;
+  /** Show the agent identity next to a distinct pane title. */
+  showAgentLabel?: boolean;
   bordered?: boolean;
   /** Border cells from `paneFrames` (shared dividers and junctions);
    * without it a bordered pane draws its own box. */
@@ -34,9 +38,8 @@ interface TerminalPaneProps {
   copyCursor?: { line: number; col: number };
 }
 
-/** A pane in Shepherd's style: rounded border in the accent colour when
- * focused, the label set into the top edge, terminal rows, and a scrollbar
- * gutter. Rows are memoized by line identity. */
+/** A pane with a quiet title surface and a single focus cue. Chrome uses the
+ * existing border cells, leaving the terminal's dimensions unchanged. */
 export const TerminalPane = memo(function TerminalPane({
   pane,
   focused,
@@ -45,6 +48,7 @@ export const TerminalPane = memo(function TerminalPane({
   lines,
   foregroundColor = theme.text,
   label = "",
+  showAgentLabel = true,
   bordered = true,
   frame,
   scrollbar = null,
@@ -62,17 +66,22 @@ export const TerminalPane = memo(function TerminalPane({
     : null;
   const side = (cells: BorderCell[] | null, index: number) => {
     const cell = cells?.[index];
-    return cell ? { text: cell.text, color: cell.accent ? theme.brand : theme.border } : null;
+    const cue = edges.focusCue;
+    const focusCue = cue && cue.index === index && cells === edges[cue.edge];
+    const fallback = !cue && focused && !edges.top && index === 0 && cells === (edges.left ?? edges.right);
+    return cell ? { text: focusCue ? cue.text : cell.text, color: focusCue || fallback ? theme.brand : theme.border } : null;
   };
 
   return (
     <Box flexDirection="column" width={width} height={height} overflow="hidden">
       {edges.top && (
-        <BorderRow
+        <PaneHeader
           cells={edges.top}
           label={label}
+          showAgentLabel={showAgentLabel}
           focused={focused}
-          status={pane.agent ? pane.status : null}
+          pane={pane}
+          focusCue={edges.focusCue?.edge === "top" ? edges.focusCue : undefined}
         />
       )}
       {Array.from({ length: contentRows }, (_, index) => (
@@ -96,7 +105,8 @@ export const TerminalPane = memo(function TerminalPane({
             : null}
         />
       ))}
-      {edges.bottom && <BorderRow cells={edges.bottom} label="" focused={focused} />}
+      {edges.bottom && <PaneFooter cells={edges.bottom} pane={pane}
+        focusCue={edges.focusCue?.edge === "bottom" ? edges.focusCue : undefined} />}
     </Box>
   );
 });
@@ -119,56 +129,154 @@ function boxFrame(width: number, height: number, accent: boolean): PaneFrame {
   };
 }
 
-/** A top or bottom border row, grouped into runs by colour, with the
- * label set into it one cell from the left. */
-function BorderRow({
+interface BorderRun {
+  text: string;
+  color?: string;
+  bold?: boolean;
+}
+
+/** Slots exclude corners and shared junctions, which must survive the title. */
+function borderSlots(cells: BorderCell[]): Array<[number, number]> {
+  const slots: Array<[number, number]> = [];
+  let start = 1;
+  for (let index = 1; index < cells.length; index += 1) {
+    if (index < cells.length - 1 && /[─ ]/.test(cells[index]!.text)) continue;
+    if (index > start) slots.push([start, index]);
+    start = index + 1;
+  }
+  return slots;
+}
+
+function putBorderText(cells: BorderRun[], start: number, text: string, color?: string, bold?: boolean) {
+  const width = displayWidth(text);
+  if (!width) return;
+  cells[start] = { text, color, bold };
+  for (let index = start + 1; index < start + width; index += 1) cells[index] = { text: "" };
+}
+
+type RowFocusCue = { index: number; text: string };
+
+function BorderLine({ cells, background, focusCue }: {
+  cells: BorderRun[];
+  background?: string;
+  focusCue?: RowFocusCue;
+}) {
+  const runs: BorderRun[] = [];
+  for (let index = 0; index < cells.length; index += 1) {
+    const cell = focusCue?.index === index ? { text: focusCue.text, color: theme.brand, bold: true } : cells[index]!;
+    if (!cell.text) continue;
+    const previous = runs.at(-1);
+    if (previous && previous.color === cell.color && previous.bold === cell.bold) previous.text += cell.text;
+    else runs.push({ ...cell });
+  }
+  return (
+    <Text backgroundColor={background} wrap="truncate-end">
+      {runs.map((run, index) => (
+        <Text key={index} color={run.color} backgroundColor={background} bold={run.bold}>{run.text}</Text>
+      ))}
+    </Text>
+  );
+}
+
+function PaneHeader({
   cells,
   label,
+  showAgentLabel,
   focused,
-  status,
+  pane,
+  focusCue,
 }: {
   cells: BorderCell[];
   label: string;
+  showAgentLabel: boolean;
   focused: boolean;
-  status?: PaneView["status"] | null;
+  pane: PaneView;
+  focusCue?: RowFocusCue;
 }) {
-  const width = cells.length;
-  const compact = width < 24;
-  const badgeWidth = status && width >= 8 ? statusBadgeWidth(status, compact) : 0;
-  const title = label && width > badgeWidth + 4
-    ? ` ${truncateText(label, width - badgeWidth - 4)} `
+  // Reserve the shared-divider cue before laying out text, including when
+  // the focused pane starts in the middle of a neighbour's wider edge.
+  const borderCells = focusCue
+    ? cells.map((cell, index) => index === focusCue.index ? { ...cell, text: focusCue.text } : cell)
+    : cells;
+  const slots = borderSlots(borderCells);
+  const row: BorderRun[] = borderCells.map((cell, index) => ({
+    text: index > 0 && index < cells.length - 1 && cell.text === "─" ? " " : cell.text,
+    color: theme.border,
+  }));
+  const first = slots[0];
+  const last = slots.at(-1);
+  if (!first || !last) return <BorderLine cells={row} background={theme.surfaceRaised} focusCue={focusCue} />;
+
+  const lane = deskLane(pane);
+  const state = {
+    blocked: { glyph: "!", label: "Needs you", color: statusColor.blocked },
+    working: { glyph: "◐", label: "Working", color: statusColor.working },
+    review: { glyph: "◇", label: "Review", color: statusColor.done },
+    ready: { glyph: "○", label: "Ready", color: theme.subtext },
+    unknown: { glyph: "·", label: "Unknown", color: theme.muted },
+  }[lane];
+  const hasStatus = Boolean(pane.agent || pane.task);
+  const longStatus = `${state.glyph} ${state.label} `;
+  const status = hasStatus && last[1] - last[0] >= 3
+    ? cells.length >= 48 && last[1] - last[0] >= displayWidth(longStatus) + 4 ? longStatus : `${state.glyph} `
     : "";
-  const runs = (from: BorderCell[]) => {
-    const result: Array<{ text: string; accent: boolean }> = [];
-    for (const cell of from) {
-      const last = result.at(-1);
-      if (last && last.accent === cell.accent) last.text += cell.text;
-      else result.push({ text: cell.text, accent: cell.accent });
+  const statusStart = last[1] - displayWidth(status);
+  if (status) putBorderText(row, statusStart, status, state.color);
+
+  const titleEnd = first === last ? statusStart - (status ? 1 : 0) : first[1];
+  let cursor = first[0];
+  if (cursor < titleEnd) {
+    putBorderText(row, cursor, focused ? "▎" : " ", focused ? theme.brand : theme.border, focused);
+    cursor += 1;
+  }
+  if (cursor < titleEnd) cursor += 1;
+  // An empty label still means no pane label, including when agent labels are disabled.
+  if (label && cursor < titleEnd) {
+    const identity = pane.displayAgent || pane.agent || "";
+    const title = label === identity ? pane.task?.title || label : label;
+    const showIdentity = showAgentLabel && identity && title !== identity &&
+      titleEnd - cursor >= displayWidth(identity) + 3 + displayWidth(title);
+    if (showIdentity) {
+      putBorderText(row, cursor, identity, theme.text, true);
+      cursor += displayWidth(identity);
+      putBorderText(row, cursor, " · ", theme.muted);
+      cursor += 3;
     }
-    return result.map((run, index) => (
-      <Text key={index} color={run.accent ? theme.brand : theme.border}>{run.text}</Text>
-    ));
-  };
-  if (!title && !badgeWidth) return <Text>{runs(cells)}</Text>;
-  const middleStart = 1 + displayWidth(title);
-  const badgeStart = width - 1 - badgeWidth;
-  return (
-    <Text wrap="truncate-end">
-      {runs(cells.slice(0, 1))}
-      {title && (
-        <Text
-          color={focused ? theme.panelContrast : theme.subtext}
-          backgroundColor={focused ? theme.brand : theme.surfaceRaised}
-          bold={focused}
-        >
-          {title}
-        </Text>
-      )}
-      {runs(cells.slice(middleStart, badgeStart))}
-      {badgeWidth > 0 && <StatusBadge status={status!} compact={compact} />}
-      {runs(cells.slice(badgeStart + badgeWidth))}
-    </Text>
-  );
+    putBorderText(row, cursor, truncateText(title, titleEnd - cursor), theme.text, !showIdentity);
+  }
+  return <BorderLine cells={row} background={theme.surfaceRaised} focusCue={focusCue} />;
+}
+
+/** Path and checks use only the bottom edge, and only reported checks get a result. */
+function PaneFooter({ cells, pane, focusCue }: { cells: BorderCell[]; pane: PaneView; focusCue?: RowFocusCue }) {
+  const row: BorderRun[] = cells.map((cell) => ({ text: cell.text, color: theme.border }));
+  const slots = borderSlots(cells);
+  const first = slots[0];
+  const last = slots.at(-1);
+  if (cells.length < 44 || !first || !last) return <BorderLine cells={row} focusCue={focusCue} />;
+  const checks = pane.task?.checkStatus;
+  const check = checks === "passed" ? { label: "✓ checks passed", color: theme.success }
+    : checks === "failed" ? { label: "× checks failed", color: theme.danger }
+      : checks === "running" ? { label: "◐ checking", color: theme.warning } : null;
+  const checkText = check ? ` ${check.label} ` : "";
+  const checkWidth = displayWidth(checkText);
+  const showCheck = check && last[1] - last[0] >= checkWidth;
+  const checkStart = showCheck ? last[1] - checkWidth : last[1];
+  if (showCheck) putBorderText(row, checkStart, checkText, check.color);
+  const available = Math.max(0, (first === last ? checkStart : first[1]) - first[0] - 3);
+  if (pane.cwd && available >= 8) {
+    let path = pane.cwd;
+    if (displayWidth(path) > available) {
+      let tail = "";
+      for (const character of [...path].reverse()) {
+        if (displayWidth(character + tail) > available - 1) break;
+        tail = character + tail;
+      }
+      path = `…${tail}`;
+    }
+    putBorderText(row, first[0], ` ${path} `, theme.muted);
+  }
+  return <BorderLine cells={row} focusCue={focusCue} />;
 }
 
 /** Thumb rows [start, end) for the scrollbar, or null with no scrollback. */

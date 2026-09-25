@@ -16,8 +16,7 @@ import type {
 } from "../types.js";
 import { displayWidth } from "./geometry.js";
 import { resolveRows, sidebarStatusText, tokenSegments, type ResolvedToken, type TokenColors } from "./sidebarTokens.js";
-import { statusBadgeSegments } from "./indicators.js";
-import { statusBackground, statusColor, statusForeground, theme } from "./theme.js";
+import { statusColor, theme } from "./theme.js";
 
 /** Drop a leading activity glyph from a terminal title used in sidebar tokens. */
 function stripTitleActivity(title: string): string {
@@ -55,6 +54,7 @@ export interface Segment {
   color?: string;
   backgroundColor?: string;
   bold?: boolean;
+  underline?: boolean;
   dim?: boolean;
   /** Animate this working glyph locally without redrawing the application. */
   animate?: boolean;
@@ -64,6 +64,8 @@ export interface Segment {
 export interface ChromeRow {
   segments: Segment[];
   background?: string;
+  /** Consecutive rows belonging to one Ink card. Keeps row hit-testing exact. */
+  block?: string;
   /** Clicking anywhere on the row not covered by a segment target. */
   target?: ClickTarget;
   /** Agent viewport bounds used by sidebar wheel input. */
@@ -74,7 +76,7 @@ const STATUS_PRIORITY: AgentStatus[] = ["blocked", "done", "unknown", "working",
 
 export function statusIcon(status: AgentStatus, style: "dots" | "symbols"): string {
   if (style === "symbols") {
-    return { blocked: "×", working: "◐", done: "✓", idle: "○", unknown: "·" }[status];
+    return { blocked: "×", working: "◐", done: "◇", idle: "○", unknown: "·" }[status];
   }
   return { blocked: "●", working: "●", done: "●", idle: "○", unknown: "·" }[status];
 }
@@ -88,7 +90,7 @@ export function rollupStatus(statuses: AgentStatus[]): AgentStatus {
 }
 
 /** Compact, color-independent session summary for the tab strip. */
-export function agentSummarySegments(state: StateView, pulse = 0): Segment[] {
+export function agentSummarySegments(state: StateView, _pulse = 0): Segment[] {
   const entries = deskEntries(state);
   const count = (status: string) => entries.filter((entry) => entry.lane === status).length;
   const blocked = count("blocked");
@@ -106,8 +108,11 @@ export function agentSummarySegments(state: StateView, pulse = 0): Segment[] {
         : entries.length > 0
           ? { status: "idle", label: `${entries.length} READY` }
           : { status: "unknown", label: "NO AGENTS" };
-  return statusBadgeSegments(summary.status, { label: summary.label, pulse, animate: true })
-    .map((segment) => ({ ...segment, target: { kind: "agent-sort" } }));
+  return [
+    { text: `${statusIcon(summary.status, "symbols")} `, color: statusColor[summary.status],
+      animate: summary.status === "working" },
+    { text: summary.label.toLowerCase(), color: theme.subtext, bold: blocked > 0 },
+  ].map((segment) => ({ ...segment, target: { kind: "agent-sort" } }));
 }
 
 export function workspaceLabel(workspace: WorkspaceView): string {
@@ -223,35 +228,18 @@ function laneStatus(lane: DeskLane): AgentStatus {
   }
 }
 
-/** Default leading indicators become readable status chips. Configured token
- * order and explicit text styling continue to take precedence. */
+/** Keep configured token order and styling, with a small live status glyph. */
 function entryTokenSegments(
   tokens: ResolvedToken[],
   colors: TokenColors,
   width: number,
   status: AgentStatus,
-  focused: boolean,
+  _focused: boolean,
   stale = false,
 ): Segment[] {
-  const first = tokens[0];
-  if (first?.kind !== "state_icon" || width < 8) return fit(tokenSegments(tokens, colors, width), width);
-  const segments = tokenSegments([
-    { ...first, text: ` ${first.text} ` },
-    ...tokens.slice(1),
-  ], colors, width);
-  if (segments[0]) {
-    const solid = focused && !stale && !first.style.fg && !first.style.dim;
-    const chip: Segment = {
-      ...segments[0],
-      color: first.style.fg ?? (stale ? theme.muted : solid ? statusForeground[status] : statusColor[status]),
-      backgroundColor: stale ? theme.surface0 : solid ? statusColor[status] : statusBackground[status],
-      bold: first.style.bold ?? true,
-    };
-    segments.splice(0, 1,
-      { ...chip, text: " " },
-      { ...chip, text: first.text, animate: status === "working" && first.text === "◐" && !stale },
-      { ...chip, text: " " },
-    );
+  const segments: Segment[] = tokenSegments(tokens, colors, width);
+  if (tokens[0]?.kind === "state_icon" && segments[0]) {
+    segments[0].animate = status === "working" && tokens[0].text === "◐" && !stale;
   }
   return fit(segments, width);
 }
@@ -460,16 +448,15 @@ function workspaceBodyRows(input: WorkspaceBodyInput): ChromeRow[] {
         stateIcon: statusColor[status],
         stateText: statusColor[status],
         workspace: { color: focused ? theme.text : theme.subtext, bold: focused },
-        secondary: focused ? theme.purple : theme.muted,
+        secondary: theme.muted,
       };
     const toggle = entry.group && input.groupToggles ? entry.group : null;
-    const firstPrefixWidth = entry.child ? 6 : 1;
-    const firstContentWidth = width - firstPrefixWidth - (toggle ? 2 : 0) - 1;
-    const leadingChip = rows[0]?.[0]?.kind === "state_icon" && firstContentWidth >= 8;
+    const firstPrefixWidth = entry.child ? 6 : 2;
+    const leadingIndicator = rows[0]?.[0]?.kind === "state_icon";
     rows.forEach((tokens, rowIndex) => {
       const prefix = rowIndex > 0
-        ? " ".repeat(firstPrefixWidth + (leadingChip ? 4 : 2))
-        : entry.child ? (entry.child.last ? "   └─ " : "   ├─ ") : " ";
+        ? " ".repeat(firstPrefixWidth + (leadingIndicator ? 2 : 0))
+        : entry.child ? (entry.child.last ? "   └─ " : "   ├─ ") : "  ";
       const reserve = rowIndex === 0 && toggle ? 2 : 0;
       const segments = entryTokenSegments(
         tokens,
@@ -480,7 +467,7 @@ function workspaceBodyRows(input: WorkspaceBodyInput): ChromeRow[] {
         input.stale,
       );
       const line: Segment[] = [
-        { text: focused || navigating ? `▌${prefix.slice(1)}` : prefix,
+        { text: focused || navigating ? `▎${prefix.slice(1)}` : prefix,
           color: focused || navigating ? theme.brand : theme.muted },
         ...(input.stale ? segments.map((segment) => ({ ...segment, dim: true })) : segments),
       ];
@@ -522,15 +509,11 @@ function machineRow(
     right.push({
       text: status === "online" || !fits ? presentation.glyph : full,
       color: presentation.color,
-      backgroundColor: status === "online"
-        ? statusBackground.idle
-        : status === "attention" ? statusBackground.blocked : theme.surface0,
       bold: true,
     });
     right.push({ text: " " });
   }
   return {
-    background: theme.surfaceDim,
     target: { kind: "machine", id },
     segments: rightAligned(
       [
@@ -559,32 +542,46 @@ export function sidebarRows(state: StateView, options: SidebarOptions): ChromeRo
   return options.compact ? compactRows(state, options) : expandedRows(state, options);
 }
 
+/** Wrap task titles at word boundaries while keeping every terminal row bounded. */
+function titleLines(value: string, width: number, limit: number): string[] {
+  if (width <= 0) return [];
+  const remaining = value.trim().replace(/\s+/g, " ");
+  if (!remaining) return [];
+  if (limit <= 1 || displayWidth(remaining) <= width) return [truncateText(remaining, width)];
+  let first = "";
+  for (const word of remaining.split(" ")) {
+    const next = first ? `${first} ${word}` : word;
+    if (displayWidth(next) > width) break;
+    first = next;
+  }
+  if (!first) return [truncateText(remaining, width)];
+  return [first, truncateText(remaining.slice(first.length).trim(), width)];
+}
+
 function expandedRows(state: StateView, options: SidebarOptions): ChromeRow[] {
   const width = Math.max(1, options.width - 1);
   const height = Math.max(0, options.height);
   if (height === 0) return [];
   const rows: ChromeRow[] = Array.from({ length: height }, () => ({ segments: [] }));
-  const spacesHeight = height < 6
-    ? Math.ceil(height / 2)
-    : Math.max(3, Math.min(height - 3, Math.round(height * 0.5)));
-
-  // Spaces section; with saved machines, Shepherd's machines variant: a row
-  // per machine (Local first) with its workspaces nested under it.
   const sidebar = options.sidebar ?? defaultSidebarConfig();
+  const defaults = defaultSidebarConfig();
+  const defaultAgentRows = JSON.stringify(sidebar.agents.rows) === JSON.stringify(defaults.agents.rows)
+    && sidebar.agents.row_gap === defaults.agents.row_gap;
   const machinesMode = state.machines.length > 0;
-  rows[0] = {
-    background: theme.surfaceRaised,
-    segments: fit([
-      { text: " ◆ ", color: theme.panelContrast, backgroundColor: theme.brand, bold: true },
-      { text: "SHEPHERD", color: theme.text, backgroundColor: theme.surfaceRaised, bold: true },
-    ], width),
-  };
-  rows[1] = {
-    background: theme.surfaceDim,
+  const brandHeight = height >= 14 ? 3 : height >= 8 ? 1 : 0;
+  if (brandHeight > 0) {
+    rows[0] = { segments: fit([
+      { text: "  ◇ ", color: theme.brand, bold: true },
+      { text: "SHEPHERD", color: theme.text, bold: true },
+    ], width) };
+  }
+  if (brandHeight === 3) {
+    rows[1] = { segments: fit([{ text: "    agent workspace", color: theme.muted }], width) };
+  }
+  rows[brandHeight] = {
     segments: rightAligned(
-      [{ text: machinesMode ? " MACHINES" : " SPACES", color: theme.brand, bold: true }],
-      [{ text: ` ${machinesMode ? state.machines.length + 1 : state.workspaces.length} `,
-        color: theme.brand, backgroundColor: theme.activeRow, bold: true }],
+      [{ text: machinesMode ? "  MACHINES" : "  WORKSPACES", color: theme.muted, bold: true }],
+      [{ text: `${machinesMode ? state.machines.length + 1 : state.workspaces.length}  `, color: theme.muted }],
       width,
     ),
   };
@@ -614,16 +611,11 @@ function expandedRows(state: StateView, options: SidebarOptions): ChromeRow[] {
         workspaces: machine.remote.workspaceList ?? [],
         status: (workspace) => remoteWorkspaceStatus(workspace, machine),
         focusedId: options.selectedRemote?.machineId === machine.id
-          ? options.selectedRemote.workspaceId
-          : null,
+          ? options.selectedRemote.workspaceId : null,
         navigateId: null,
         collapsedGroups: undefined,
         stale: machine.status !== "online",
-        target: (workspace) => ({
-          kind: "remote-workspace",
-          machineId: machine.id,
-          workspaceId: workspace.id,
-        }),
+        target: (workspace) => ({ kind: "remote-workspace", machineId: machine.id, workspaceId: workspace.id }),
         groupToggles: false,
         sidebar,
         indicators: options.indicators,
@@ -631,141 +623,162 @@ function expandedRows(state: StateView, options: SidebarOptions): ChromeRow[] {
       }));
     }
   }
-  const footerRow = spacesHeight - 1;
-  const bodyStart = 2;
-  const bodyRows = Math.max(0, footerRow - bodyStart);
+  // Navigation takes the space its content needs. The agent list gets the
+  // remainder instead of inheriting a fixed half-screen empty region.
+  const bodyStart = brandHeight + 1;
+  const sectionGap = height >= 14 ? 1 : 0;
+  // On short screens, drop section spacing before workspace rows. Reserve
+  // the agents heading, one agent row, the bottom rail, and mouse controls.
+  const reservedRows = 3 + sectionGap * 2 + (options.mouse ? 1 : 0);
+  // Retain the previous navigation capacity: unlike agents, workspaces do
+  // not have an independent scroll viewport. Short lists still shrink.
+  const bodyRows = Math.min(body.length, Math.max(1, Math.round(height * 0.5) - 3), Math.max(0, height - bodyStart - reservedRows));
   const selectedRemote = options.selectedRemote;
-  const activeIndex = body.findIndex((row) =>
-    selectedRemote
-      ? row.target?.kind === "remote-workspace" &&
-        row.target.machineId === selectedRemote.machineId &&
-        row.target.workspaceId === selectedRemote.workspaceId
-      : row.target?.kind === "workspace" && row.target.id === options.activeWorkspaceId
-  );
+  const activeIndex = body.findIndex((row) => selectedRemote
+    ? row.target?.kind === "remote-workspace" && row.target.machineId === selectedRemote.machineId
+      && row.target.workspaceId === selectedRemote.workspaceId
+    : row.target?.kind === "workspace" && row.target.id === options.activeWorkspaceId);
   const offset = activeIndex >= bodyRows
-    ? Math.min(activeIndex - bodyRows + 2, Math.max(0, body.length - bodyRows))
-    : 0;
+    ? Math.min(Math.max(0, activeIndex - bodyRows + (bodyRows > 1 ? 2 : 1)), Math.max(0, body.length - bodyRows)) : 0;
   for (let index = 0; index < bodyRows; index += 1) {
     const row = body[offset + index];
     if (row) rows[bodyStart + index] = row;
   }
-  if (options.mouse && footerRow > 0) {
+  const footerRow = bodyStart + bodyRows;
+  if (options.mouse && footerRow < height - 2) {
     rows[footerRow] = {
-      segments: rightAligned(
-        [{ text: " + new", color: theme.brand, bold: true, target: { kind: "new-workspace" } }],
-        [{ text: "menu", color: theme.subtext, target: { kind: "menu" } }],
-        width,
-      ),
+      segments: fit([{ text: "  + New workspace", color: theme.muted, target: { kind: "new-workspace" } }], width),
     };
   }
-
-  // Agents section.
-  const agentsTop = spacesHeight;
-  if (agentsTop < height) {
-    rows[agentsTop] = { segments: [{ text: "─".repeat(width), color: theme.surfaceDim }] };
-  }
+  const agentsTop = Math.min(height - 2, footerRow + (options.mouse ? 1 : 0) + sectionGap);
   const agents = agentEntries(state, options.sort);
   const grouped = normalizeAgentSort(options.sort) === "status" && !state.agentView?.sort.length;
-  if (agentsTop + 1 < height) {
-    rows[agentsTop + 1] = {
-      background: theme.surfaceDim,
+  if (agentsTop >= 0) {
+    rows[agentsTop] = {
       segments: rightAligned(
-        [
-          { text: " AGENTS ", color: theme.brand, bold: true, target: { kind: "agent-sort" } },
-          { text: String(agents.length), color: theme.brand, backgroundColor: theme.activeRow, bold: true,
-            target: { kind: "agent-sort" } },
-        ],
-        [state.agentView
-          ? { text: state.agentView.label ?? "view", color: theme.brand, bold: true }
-          : {
-            text: grouped ? "status" : "spaces",
-            color: theme.subtext,
-            bold: true,
-            target: { kind: "agent-sort" },
-          }],
+        [{ text: "  AGENTS", color: theme.muted, bold: true, target: { kind: "agent-sort" } },
+          { text: `  ${agents.length}`, color: theme.muted, target: { kind: "agent-sort" } }],
+        [{ text: `${state.agentView?.label ?? (state.agentView ? "view" : grouped ? "status" : "spaces")} ↓ `,
+          color: theme.muted, target: { kind: "agent-sort" } }],
         width,
       ),
     };
   }
+  const agentsBody = Math.max(0, agentsTop + 1 + sectionGap);
+  const availableRows = Math.max(0, height - 1 - agentsBody);
+  const groupCount = grouped ? new Set(agents.map((entry) => deskLane(entry.pane))).size : 0;
+  const roomy = availableRows >= agents.length * 5 + groupCount * 2 - 1;
   const agentRows: ChromeRow[] = [];
   const pushAgent = (entry: AgentEntry) => {
-    const focused = entry.pane.id === options.focusedPaneId;
-    const target: ClickTarget = { kind: "agent", paneId: entry.pane.id };
-    const background = focused ? theme.activeRow : undefined;
     const pane = entry.pane;
+    const focused = pane.id === options.focusedPaneId;
+    const target: ClickTarget = { kind: "agent", paneId: pane.id };
+    const background = focused ? theme.activeRow : undefined;
+    const configuredRows = sidebar.agents.rows_by_agent[pane.agent ?? ""];
+    if (defaultAgentRows && !configuredRows) {
+      const lane = deskLane(pane);
+      const title = pane.task?.title || pane.metadataTitle
+        || (pane.terminalTitle ? stripTitleActivity(pane.terminalTitle) : null)
+        || pane.title || pane.displayAgent || pane.agent || "Agent";
+      const agent = pane.displayAgent || pane.agent || "Agent";
+      const workspace = workspaceLabel(entry.workspace);
+      const location = entry.workspace.tabs.length > 1 && entry.tab.name && entry.tab.name !== workspace
+        ? `${workspace} / ${entry.tab.name}` : workspace;
+      const detail = pane.task?.blocker
+        || (pane.task?.checkStatus === "failed" ? pane.task.checkSummary || "Checks failed" : null)
+        || pane.task?.nextAction || pane.task?.checkSummary || pane.task?.summary;
+      const stateLabel = pane.stateLabels?.[pane.status] ?? sidebarStatusText(laneStatus(lane));
+      const contentWidth = Math.max(1, width - 5);
+      const line = (segments: Segment[]) => agentRows.push({
+        target, background, block: `agent:${pane.id}`,
+        segments: fit([{ text: focused ? "▎ " : "  ", color: theme.brand }, ...segments,
+          { text: " " }], width),
+      });
+      const titleRows = titleLines(title, contentWidth, roomy ? 2 : 1);
+      titleRows.forEach((text, index) => line([
+        { text: index === 0 ? `${options.indicators === "symbols" ? laneGlyph(lane) : statusIcon(laneStatus(lane), options.indicators)} ` : "  ",
+          color: laneColor(lane), animate: index === 0 && lane === "working" && options.indicators === "symbols" },
+        { text, color: theme.text, bold: true },
+      ]));
+      line([{ text: `  ${truncateText(`${agent} · ${location}`, contentWidth)}`, color: theme.muted }]);
+      if (detail) {
+        for (const text of titleLines(detail, contentWidth, roomy ? 2 : 1)) {
+          line([{ text: "  ", color: theme.muted },
+            { text, color: lane === "blocked" ? theme.subtext : theme.muted }]);
+        }
+      } else if (!grouped) {
+        line([{ text: `  ${truncateText(stateLabel, contentWidth)}`, color: laneColor(lane) }]);
+      }
+      return;
+    }
+    // Customized token templates remain literal: no injected title, status,
+    // metadata, or extra row replaces the user's own layout.
     const showTab = entry.workspace.tabs.length > 1 || Boolean(entry.tab.name);
     const title = pane.terminalTitle || null;
-    const tokenRows = resolveRows(
-      sidebar.agents.rows_by_agent[pane.agent ?? ""] ?? sidebar.agents.rows,
-      {
-        state_icon: statusIcon(pane.status, options.indicators),
-        state_text: pane.stateLabels?.[pane.status] ?? sidebarStatusText(pane.status),
-        machine: null,
-        workspace: workspaceLabel(entry.workspace),
-        tab: showTab ? tabLabel(entry.tab, entry.tabIndex) : null,
-        pane: pane.task?.title || pane.metadataTitle || pane.title || null,
-        agent: pane.displayAgent || pane.agent || pane.metadataTitle || null,
-        terminal_title: title,
-        terminal_title_stripped: title ? stripTitleActivity(title) : null,
-        tokens: pane.tokens ?? {},
-      },
-    );
+    const tokenRows = resolveRows(configuredRows ?? sidebar.agents.rows, {
+      state_icon: statusIcon(pane.status, options.indicators),
+      state_text: pane.stateLabels?.[pane.status] ?? sidebarStatusText(pane.status),
+      machine: null,
+      workspace: workspaceLabel(entry.workspace),
+      tab: showTab ? tabLabel(entry.tab, entry.tabIndex) : null,
+      pane: pane.task?.title || pane.metadataTitle || pane.title || null,
+      agent: pane.displayAgent || pane.agent || pane.metadataTitle || null,
+      terminal_title: title,
+      terminal_title_stripped: title ? stripTitleActivity(title) : null,
+      tokens: pane.tokens ?? {},
+    });
     const colors = {
-      stateIcon: statusColor[pane.status],
-      stateText: statusColor[pane.status],
+      stateIcon: statusColor[pane.status], stateText: statusColor[pane.status],
       workspace: { color: focused ? theme.text : theme.subtext, bold: true },
       secondary: focused ? theme.subtext : theme.muted,
     };
-    const leadingChip = tokenRows[0]?.[0]?.kind === "state_icon" && width - 1 >= 8;
-    (tokenRows.length > 0 ? tokenRows : [[{ kind: "state_icon" as const, text: statusIcon(pane.status, options.indicators), style: {} }]])
-      .forEach((tokens, rowIndex) => {
-        const indent = rowIndex === 0 ? " " : leadingChip ? "     " : "   ";
-        agentRows.push({
-          background,
-          target,
-          segments: fit([
-            { text: focused ? `▌${indent.slice(1)}` : indent, color: theme.brand },
-            ...entryTokenSegments(tokens, colors, width - indent.length, pane.status, focused),
-          ], width),
-        });
+    tokenRows.forEach((tokens, rowIndex) => {
+      const indent = rowIndex === 0 ? "  " : "    ";
+      agentRows.push({
+        background, target, block: `agent:${pane.id}`,
+        segments: fit([
+          { text: focused ? `▎${indent.slice(1)}` : indent, color: theme.brand },
+          ...entryTokenSegments(tokens, colors, width - indent.length - 1, pane.status, focused),
+        ], width),
       });
+    });
+  };
+  const pushGap = (entry: AgentEntry) => {
+    const custom = !defaultAgentRows || Boolean(sidebar.agents.rows_by_agent[entry.pane.agent ?? ""]);
+    const gap = custom ? sidebar.agents.row_gap : 1;
+    for (let index = 0; index < gap; index += 1) agentRows.push({ segments: [] });
   };
   if (grouped) {
     for (const lane of LANE_ORDER) {
       const group = agents.filter((entry) => deskLane(entry.pane) === lane);
       if (group.length === 0) continue;
       if (agentRows.length > 0) agentRows.push({ segments: [] });
-      const status = laneStatus(lane);
-      agentRows.push({
-        background: statusBackground[status],
-        segments: rightAligned(
-          [{ text: ` ${laneGlyph(lane)} ${LANE_LABELS[lane]}`, color: laneColor(lane), bold: true }],
-          [{ text: ` ${group.length} `, color: statusForeground[status], backgroundColor: statusColor[status], bold: true }],
-          width,
-        ),
-      });
+      agentRows.push({ segments: rightAligned(
+        [{ text: `  ${laneGlyph(lane)} `, color: laneColor(lane) },
+          { text: LANE_LABELS[lane], color: theme.muted, bold: true }],
+        [{ text: `${group.length}  `, color: theme.muted }], width,
+      ) });
       group.forEach((entry, index) => {
         pushAgent(entry);
-        if (index < group.length - 1) {
-          for (let gap = 0; gap < sidebar.agents.row_gap; gap += 1) agentRows.push({ segments: [] });
-        }
+        if (index < group.length - 1) pushGap(entry);
       });
     }
   } else {
-    agents.forEach((entry, entryIndex) => {
+    agents.forEach((entry, index) => {
       pushAgent(entry);
-      if (entryIndex < agents.length - 1) {
-        for (let gap = 0; gap < sidebar.agents.row_gap; gap += 1) agentRows.push({ segments: [] });
-      }
+      if (index < agents.length - 1) pushGap(entry);
     });
   }
-  const agentsBody = agentsTop + 3;
-  const visibleCapacity = Math.max(0, height - 1 - agentsBody);
-  const overflowing = agentRows.length > visibleCapacity && visibleCapacity > 1;
-  const capacity = overflowing ? visibleCapacity - 1 : visibleCapacity;
+  if (agentRows.length === 0) {
+    agentRows.push({ segments: fit([{ text: "  Your agents appear here.", color: theme.muted }], width) });
+  }
+  const overflowing = agentRows.length > availableRows && availableRows > 1;
+  const capacity = overflowing ? availableRows - 1 : availableRows;
   const maxOffset = Math.max(0, agentRows.length - capacity);
   const focusedRow = agentRows.findIndex((row) => row.target?.kind === "agent" && row.target.paneId === options.focusedPaneId);
-  const initialOffset = focusedRow >= capacity ? focusedRow : 0;
+  // Include preceding lane context only when it leaves room for the focused
+  // card itself. A one-row viewport must reveal the agent, not its header.
+  const initialOffset = focusedRow >= capacity ? Math.max(0, focusedRow - (capacity > 1 ? 1 : 0)) : 0;
   const agentOffset = Math.max(0, Math.min(maxOffset, options.agentScroll ?? initialOffset));
   for (let index = 0; index < capacity; index += 1) {
     const row = agentRows[agentOffset + index];
@@ -773,30 +786,18 @@ function expandedRows(state: StateView, options: SidebarOptions): ChromeRow[] {
   }
   if (overflowing) {
     rows[height - 2] = { segments: rightAligned(
-      agentOffset > 0 ? [{ text: " ↑ prev", color: theme.brand, target: { kind: "agent-scroll", offset: Math.max(0, agentOffset - capacity) } }] : [],
-      agentOffset < maxOffset ? [{ text: "next ↓ ", color: theme.brand, target: { kind: "agent-scroll", offset: Math.min(maxOffset, agentOffset + capacity) } }] : [],
+      agentOffset > 0 ? [{ text: "  ↑ prev", color: theme.muted, target: { kind: "agent-scroll", offset: Math.max(0, agentOffset - capacity) } }] : [],
+      agentOffset < maxOffset ? [{ text: "next ↓  ", color: theme.muted, target: { kind: "agent-scroll", offset: Math.min(maxOffset, agentOffset + capacity) } }] : [],
       width,
     ) };
   }
-  for (let index = agentsTop + 1; index < height - 1; index += 1) {
+  for (let index = Math.max(0, agentsTop); index < height - 1; index += 1) {
     rows[index]!.agentScroll = { offset: agentOffset, maxOffset };
   }
-  // Collapse toggle in the bottom-right corner.
-  if (height > 0) {
-    const last = rows[height - 1] ?? { segments: [] };
-    const used = last.segments.reduce((total, segment) => total + displayWidth(segment.text), 0);
-    const toggleAt = Math.max(0, width - 2);
-    if (used <= toggleAt) {
-      rows[height - 1] = {
-        ...last,
-        segments: [
-          ...last.segments,
-          { text: " ".repeat(toggleAt - used) },
-          { text: "«", color: theme.muted, target: { kind: "sidebar-toggle" } },
-        ],
-      };
-    }
-  }
+  rows[height - 1] = { segments: rightAligned(
+    options.mouse ? [{ text: "  ≡ Menu", color: theme.muted, target: { kind: "menu" } }] : [],
+    [{ text: "« ", color: theme.muted, target: { kind: "sidebar-toggle" } }], width,
+  ) };
   return rows.slice(0, height);
 }
 
@@ -822,8 +823,7 @@ function compactRows(state: StateView, options: SidebarOptions): ChromeRow[] {
         },
         {
           text: statusIcon(status, options.indicators),
-          color: focused ? statusForeground[status] : statusColor[status],
-          backgroundColor: focused ? statusColor[status] : statusBackground[status],
+          color: statusColor[status],
           bold: true,
           animate: status === "working" && options.indicators === "symbols",
         },
@@ -867,8 +867,7 @@ function compactRows(state: StateView, options: SidebarOptions): ChromeRow[] {
           },
           {
             text: statusIcon(entry.pane.status, options.indicators),
-            color: focused ? statusForeground[entry.pane.status] : statusColor[entry.pane.status],
-            backgroundColor: focused ? statusColor[entry.pane.status] : statusBackground[entry.pane.status],
+            color: statusColor[entry.pane.status],
             bold: true,
             animate: entry.pane.status === "working" && options.indicators === "symbols",
           },
@@ -936,8 +935,8 @@ export function tabBarRow(tabs: TabView[], options: TabBarOptions): ChromeRow {
     const padding = item.width - displayWidth(item.label);
     const left = Math.floor(padding / 2);
     const style = focused
-      ? { color: theme.panelContrast, backgroundColor: theme.brand, bold: true }
-      : { color: item.custom ? theme.subtext : theme.muted, backgroundColor: theme.surfaceDim };
+      ? { color: theme.text, backgroundColor: theme.surface0, bold: true, underline: true }
+      : { color: item.custom ? theme.subtext : theme.muted, backgroundColor: theme.panelBg };
     return [
       {
         text: `${" ".repeat(left)}${item.label}${" ".repeat(padding - left)}`,

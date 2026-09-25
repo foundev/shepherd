@@ -27,7 +27,7 @@ describe("native Ink indicators", () => {
       const frame = renderToString(<Box flexDirection="column">
         {statuses.map((status) => <StatusBadge key={status} status={status} />)}
       </Box>);
-      for (const label of ["× BLOCKED", "◐ WORKING", "✓ REVIEW", "○ IDLE", "· UNKNOWN"]) {
+      for (const label of ["× BLOCKED", "◐ WORKING", "◇ REVIEW", "○ IDLE", "· UNKNOWN"]) {
         expect(frame).toContain(label);
       }
       expect(frame).not.toContain("\x1b[");
@@ -50,8 +50,8 @@ describe("native Ink indicators", () => {
     const restore = configureTerminalColors({ isTTY: true }, { FORCE_COLOR: "2" });
     try {
       applyTheme("shepherd", { red: "#123456", yellow: "#ffee99" });
-      const full = renderToString(<StatusBadge status="blocked" />);
-      const compact = renderToString(<StatusBadge status="working" compact />);
+      const full = renderToString(<StatusBadge status="blocked" solid />);
+      const compact = renderToString(<StatusBadge status="working" compact solid />);
       expect(full).toContain("\x1b[48;5;");
       expect(full).not.toMatch(/\x1b\[(38|48);2;/);
       expect(stripVTControlCharacters(full)).toBe(" × BLOCKED ");
@@ -69,7 +69,7 @@ describe("native Ink indicators", () => {
     ["lightblue", "white"], ["lightmagenta", "black"], ["lightcyan", "black"],
   ])("keeps solid status chips legible with the named color %s", (color, foreground) => {
     applyTheme("shepherd", { red: color });
-    const [icon] = statusBadgeSegments("blocked", { compact: true });
+    const [icon] = statusBadgeSegments("blocked", { compact: true, solid: true });
     expect(icon?.color).toBe(foreground);
     expect(icon?.color).not.toBe(icon?.backgroundColor);
   });
@@ -95,7 +95,8 @@ describe("native Ink indicators", () => {
     applyTheme("shepherd", { overlay0: "gray", surface0: "gray" });
     const [, label] = statusBadgeSegments("unknown");
     expect(label?.color).toBe("gray");
-    expect(label?.backgroundColor).toBe("black");
+    expect(label?.backgroundColor).toBeUndefined();
+    expect(statusBackground.unknown).toBe("black");
   });
 
   it("shares one activity clock, updates only indicator leaves, and stops after unmount", async () => {

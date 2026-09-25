@@ -118,7 +118,8 @@ describe("limited color rendering", () => {
       applyTheme("shepherd");
       expect(theme.background).toBe(PALETTES.shepherd!.panel_bg);
       const frame = renderToString(<Text backgroundColor={theme.background}>RGB</Text>);
-      expect(frame).toContain("\x1b[48;2;16;23;34m");
+      const rgb = [1, 3, 5].map((offset) => Number.parseInt(PALETTES.shepherd!.panel_bg!.slice(offset, offset + 2), 16));
+      expect(frame).toContain(`\x1b[48;2;${rgb.join(";")}m`);
       expect(env).toEqual(wsl);
     } finally { restore(); }
     expect(chalk.level).toBe(previousLevel);

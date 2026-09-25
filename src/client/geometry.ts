@@ -11,15 +11,16 @@ export interface ScreenOptions {
   tabBar: "top" | "bottom" | "none";
   /** At or below this many columns the screen uses the phone layout. */
   mobileThreshold?: number;
+  /** Workspace context and shortcut footer on desktop-sized screens. */
+  workspaceChrome?: boolean;
 }
 
 /** Rows of the phone-width header above the panes. */
 export const MOBILE_HEADER_HEIGHT = 2;
 
 /** Absolute screen regions (0-based cells, as SGR mouse reports minus one).
- * Shepherd's layout: sidebar on the left at full height, a one-row tab bar
- * over the main area, and the pane surface below it. Mode bars paint over
- * the last row of the pane surface. */
+ * The sidebar spans the screen; workspace context, tabs, terminal surfaces,
+ * and shortcuts occupy separate rows. Compact layouts reclaim context rows. */
 export interface ScreenLayout {
   columns: number;
   rows: number;
@@ -31,6 +32,8 @@ export interface ScreenLayout {
   mobile: boolean;
   /** The phone-width header, when `mobile`. */
   header: Rect | null;
+  workspaceHeader: Rect | null;
+  footer: Rect | null;
 }
 
 export function screenLayout(
@@ -64,6 +67,8 @@ export function screenLayout(
       modeBar: { x: 0, y: safeRows - 1, width: safeColumns, height: 1 },
       mobile,
       header: { x: 0, y: 0, width: safeColumns, height: headerHeight },
+      workspaceHeader: null,
+      footer: null,
     };
   }
   const preferred = options.sidebarState === "hidden"
@@ -74,13 +79,16 @@ export function screenLayout(
   const sidebarWidth = Math.max(0, Math.min(safeColumns - 1, preferred));
   const mainX = sidebarWidth;
   const mainWidth = safeColumns - sidebarWidth;
+  const workspaceChrome = Boolean(options.workspaceChrome && options.tabBar !== "none" && safeRows >= 24 && mainWidth >= 46);
+  const headerHeight = workspaceChrome ? 3 : 0;
+  const footerHeight = workspaceChrome ? 1 : 0;
   const tabBarRow = options.tabBar === "none" || safeRows <= 1
     ? null
     : options.tabBar === "bottom"
-      ? safeRows - 1
-      : 0;
-  const surfaceY = tabBarRow === 0 ? 1 : 0;
-  const surfaceHeight = safeRows - (tabBarRow === null ? 0 : 1);
+      ? safeRows - footerHeight - 1
+      : headerHeight;
+  const surfaceY = headerHeight + (options.tabBar === "top" && tabBarRow !== null ? 1 : 0);
+  const surfaceHeight = safeRows - headerHeight - footerHeight - (tabBarRow === null ? 0 : 1);
   const main = { x: mainX, y: surfaceY, width: mainWidth, height: surfaceHeight };
   return {
     columns: safeColumns,
@@ -90,11 +98,15 @@ export function screenLayout(
       ? null
       : { x: mainX, y: tabBarRow, width: mainWidth, height: 1 },
     main,
-    modeBar: tabBarRow !== null && tabBarRow === safeRows - 1
+    modeBar: workspaceChrome
+      ? { x: mainX, y: safeRows - 1, width: mainWidth, height: 1 }
+      : tabBarRow !== null && tabBarRow === safeRows - 1
       ? { x: mainX, y: tabBarRow, width: mainWidth, height: 1 }
       : { x: mainX, y: main.y + main.height - 1, width: mainWidth, height: 1 },
     mobile,
     header: null,
+    workspaceHeader: workspaceChrome ? { x: mainX, y: 0, width: mainWidth, height: headerHeight } : null,
+    footer: workspaceChrome ? { x: mainX, y: safeRows - 1, width: mainWidth, height: footerHeight } : null,
   };
 }
 
@@ -229,6 +241,8 @@ export interface PaneFrame {
   bottom: BorderCell[] | null;
   left: BorderCell[] | null;
   right: BorderCell[] | null;
+  /** A fallback marker on an existing edge when the focused pane has no title row. */
+  focusCue?: { edge: keyof PaneEdges; index: number; text: string };
 }
 
 const UP = 1;
@@ -355,6 +369,32 @@ export function paneFrames(
       left: edges.left ? column(rect.x) : null,
       right: edges.right ? column(right) : null,
     });
+  }
+  const focusedFrame = focusedPaneId ? frames.get(focusedPaneId) : undefined;
+  if (focused && focusedFrame && !focusedFrame.top) {
+    // Prefer an edge owned by the focused pane. Arrows point into it so a
+    // shared divider still distinguishes focus on either side of the line.
+    if (focusedFrame.left?.length) focusedFrame.focusCue = { edge: "left", index: 0, text: "▸" };
+    else if (focusedFrame.right?.length) focusedFrame.focusCue = { edge: "right", index: 0, text: "◂" };
+    else if (focusedFrame.bottom?.length) focusedFrame.focusCue = { edge: "bottom", index: 0, text: "↑" };
+    else {
+      // Without outer borders or gaps, the neighbour owns the only divider.
+      const neighbour = panes.find(({ rect, edges }) => edges.left &&
+        rect.x === focused.x + focused.width && overlaps(rect.y, rect.height, focused.y, focused.height));
+      if (neighbour) {
+        const frame = frames.get(neighbour.paneId)!;
+        const firstRow = neighbour.rect.y + (neighbour.edges.top ? 1 : 0);
+        const index = Math.max(0, focused.y - firstRow);
+        if (frame.left?.[index]) frame.focusCue = { edge: "left", index, text: "◂" };
+      } else {
+        const below = panes.find(({ rect, edges }) => edges.top &&
+          rect.y === focused.y + focused.height && overlaps(rect.x, rect.width, focused.x, focused.width));
+        if (below) {
+          const frame = frames.get(below.paneId)!;
+          frame.focusCue = { edge: "top", index: Math.max(0, focused.x - below.rect.x), text: "↑" };
+        }
+      }
+    }
   }
   return frames;
 }

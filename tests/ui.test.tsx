@@ -5,8 +5,42 @@ import { App } from "../src/client/App.js";
 import { configureTerminalColors } from "../src/client/colors.js";
 import { applyTheme } from "../src/client/theme.js";
 import { defaultLoadedConfig } from "../src/config/model.js";
+import { computeLayout, framePanes, paneContentRect, screenLayout } from "../src/client/geometry.js";
 import * as notifications from "../src/client/notifications.js";
 import type { ShepherdRequest, StateView } from "../src/types.js";
+
+const desktop = fixtureGeometry();
+
+/** The Ink test stream is 100×40. Match the app's configured screen regions
+ * so interaction tests address pane content even as the chrome evolves. */
+function fixtureGeometry(config = defaultLoadedConfig()) {
+  const ui = config.config.ui;
+  const screen = screenLayout(100, 40, {
+    sidebarWidth: ui.sidebar_width,
+    sidebarState: ui.sidebar_start_collapsed ? ui.sidebar_collapsed_mode : "expanded",
+    tabBar: ui.hide_tab_bar_when_single_tab ? "none" : ui.tab_bar_position,
+    mobileThreshold: ui.mobile_width_threshold,
+    workspaceChrome: true,
+  });
+  const layout = computeLayout(testState().workspaces[0]!.tabs[0]!.layout, screen.main);
+  const panes = framePanes(layout.panes, {
+    borders: ui.pane_borders, gaps: ui.pane_gaps, outerBorders: ui.pane_outer_borders,
+  });
+  const content = (paneId: string) => {
+    const pane = panes.find((entry) => entry.paneId === paneId)!;
+    return paneContentRect(pane.rect, { bordered: false, edges: pane.edges, scrollbar: ui.pane_scrollbars });
+  };
+  return { screen, panes, splits: layout.splits, content };
+}
+
+function mouse(button: number, x: number, y: number, phase: "M" | "m" = "M"): string {
+  return `\x1b[<${button};${x + 1};${y + 1}${phase}`;
+}
+
+function paneMouse(button: number, paneId: string, column: number, row: number, phase: "M" | "m" = "M"): string {
+  const content = desktop.content(paneId);
+  return mouse(button, content.x + column, content.y + row, phase);
+}
 
 describe("Shepherd UI", () => {
   it("clears a custom workspace name to restore automatic naming", async () => {
@@ -29,11 +63,11 @@ describe("Shepherd UI", () => {
     ["2", false], ["2", true], ["3", false], ["3", true],
   ] as const)("refreshes idle pane and chrome colors on appearance changes (level=%s, mobile=%s)", async (level, mobile) => {
     const restore = configureTerminalColors({ isTTY: true }, { FORCE_COLOR: level });
-    const darkBg = level === "2" ? "\x1b[48;5;234m" : "\x1b[48;2;16;23;34m";
-    const darkSidebar = level === "2" ? "\x1b[48;5;233m" : "\x1b[48;2;11;17;27m";
-    const darkFg = level === "2" ? "\x1b[38;5;255m" : "\x1b[38;2;233;240;242m";
-    const lightBg = level === "2" ? "\x1b[48;5;231m" : "\x1b[48;2;248;250;248m";
-    const lightFg = level === "2" ? "\x1b[38;5;235m" : "\x1b[38;2;25;48;46m";
+    const darkBg = level === "2" ? "\x1b[48;5;233m" : "\x1b[48;2;17;19;24m";
+    const darkSidebar = level === "2" ? "\x1b[48;5;234m" : "\x1b[48;2;23;25;31m";
+    const darkFg = level === "2" ? "\x1b[38;5;255m" : "\x1b[38;2;240;241;245m";
+    const lightBg = level === "2" ? "\x1b[48;5;231m" : "\x1b[48;2;251;250;252m";
+    const lightFg = level === "2" ? "\x1b[38;5;235m" : "\x1b[38;2;37;35;50m";
     const config = defaultLoadedConfig();
     config.config.theme.auto_switch = true;
     config.config.ui.mobile_width_threshold = mobile ? 100 : 0;
@@ -70,6 +104,33 @@ describe("Shepherd UI", () => {
     }
   });
 
+  it("refreshes idle pane chrome when a custom foreground stays fixed across appearance changes", async () => {
+    const restore = configureTerminalColors({ isTTY: true }, { FORCE_COLOR: "3" });
+    const config = defaultLoadedConfig();
+    config.config.theme.auto_switch = true;
+    config.config.theme.custom.text = "#abcdef";
+    config.config.ui.pane_scrollbars = false;
+    const instance = render(<App connection={new FakeConnection(testState())} config={config} />);
+    try {
+      await flushApp();
+      const headerY = fixtureGeometry(config).screen.main.y;
+      const header = () => (instance.lastFrame() ?? "").split("\n")[headerY] ?? "";
+      expect(header()).toContain("\x1b[48;2;32;35;43m");
+      instance.stdin.write("\x1b[?997;2n");
+      await flushApp();
+      expect(header()).toContain("\x1b[48;2;238;236;242m");
+      expect(header()).not.toContain("\x1b[48;2;32;35;43m");
+      instance.stdin.write("\x1b[?997;1n");
+      await flushApp();
+      expect(header()).toContain("\x1b[48;2;32;35;43m");
+      expect(header()).not.toContain("\x1b[48;2;238;236;242m");
+    } finally {
+      instance.unmount();
+      restore();
+      applyTheme("shepherd");
+    }
+  });
+
   it("pages and scrolls overflow agents without sending wheel input to a pane", async () => {
     const state = { ...testState(), machines: [] };
     const workspace = state.workspaces[0]!;
@@ -91,7 +152,7 @@ describe("Shepherd UI", () => {
       const paged = instance.lastFrame();
       expect(paged).toContain("↑ prev");
       expect(paged).not.toBe(lines.join("\n"));
-      instance.stdin.write(`\x1b[<65;4;${row}M`);
+      instance.stdin.write(`\x1b[<64;4;${row}M`);
       await flushApp();
       expect(instance.lastFrame()).not.toBe(paged);
       expect(connection.requests.some((request) => request.type === "surface.scroll" || request.type === "pane.mouse")).toBe(false);
@@ -103,11 +164,11 @@ describe("Shepherd UI", () => {
     const instance = render(<App connection={connection} />);
     try {
       await flushApp();
-      expect(instance.lastFrame()).toMatch(/ AGENTS 1 +status/);
+      expect(instance.lastFrame()).toMatch(/ AGENTS +1 +status/);
       expect(instance.lastFrame()).toContain("× NEEDS YOU");
       instance.stdin.write("\x02d"); await flushApp();
       const grouped = instance.lastFrame() ?? "";
-      expect(grouped).toMatch(/ AGENTS 1 +spaces/);
+      expect(grouped).toMatch(/ AGENTS +1 +spaces/);
       expect(grouped).not.toContain("× NEEDS YOU");
       instance.stdin.write("\x02d"); await flushApp();
       expect(instance.lastFrame()).toContain("× NEEDS YOU");
@@ -122,15 +183,16 @@ describe("Shepherd UI", () => {
     const frame = instance.lastFrame() ?? "";
     const lines = frame.split("\n");
     // Shepherd's brand and agent status frame the active workspace and panes.
-    expect(lines[0]).toMatch(/^ ◆ SHEPHERD +│ +review/);
-    expect(lines[1]).toMatch(/^ SPACES +1 +│/);
+    expect(lines[0]).toMatch(/^  ◇ SHEPHERD +│/);
+    expect(lines[1]).toMatch(/^    agent workspace +│ +production +1 needs you/);
+    expect(lines[desktop.screen.tabBar!.y]).toMatch(/^  WORKSPACES +1 +│ +review/);
     expect(frame).toContain("production");
-    expect(frame).toContain(" AGENTS 1");
-    expect(frame).toContain("× 1 NEEDS YOU");
+    expect(frame).toContain(" AGENTS  1");
+    expect(frame).toContain("1 needs you");
     expect(frame).toContain("claude");
     expect(frame).toContain("hello agent");
     expect(frame).toContain("alpha");
-    expect(frame).toMatch(/│╭ shell ─+╮╭ claude ─+ × BLOCKED ╮/);
+    expect(frame).toMatch(/│╭  shell +╮╭▎ claude +! ╮/);
     expect(frame).not.toContain("connecting to Shepherd");
 
     instance.unmount();
@@ -151,14 +213,14 @@ describe("Shepherd UI", () => {
     await flushApp();
 
     const lines = (instance.lastFrame() ?? "").split("\n");
-    expect(lines[0]).toMatch(/^ ◆ SHEPHERD +│/);
-    expect(lines[1]).toMatch(/^ MACHINES +3 +│/);
+    expect(lines[0]).toMatch(/^  ◇ SHEPHERD +│/);
+    expect(lines[3]).toMatch(/^  MACHINES +3 +│/);
     const localRow = lines.findIndex((line) => /^ ▾ Local/.test(line));
     const edgeRow = lines.findIndex((line) => /^ ▾ edge +● /.test(line));
     const remoteRow = lines.findIndex((line) => line.includes("remote-api"));
-    const gpuRow = lines.findIndex((line) => /^ ▾ gpu box +◐ +│/.test(line));
+    const gpuRow = lines.findIndex((line) => /^ ▾ gpu box +◐ reconnecting +│/.test(line));
     expect(localRow).toBeGreaterThan(0);
-    expect(lines.findIndex((line) => line.includes("production"))).toBeGreaterThan(localRow);
+    expect(lines.findIndex((line) => line.slice(0, desktop.screen.sidebar.width).includes("production"))).toBeGreaterThan(localRow);
     expect(edgeRow).toBeGreaterThan(localRow);
     expect(remoteRow).toBe(edgeRow + 1);
     expect(gpuRow).toBeGreaterThan(remoteRow);
@@ -183,8 +245,7 @@ describe("Shepherd UI", () => {
     await flushApp();
     const collapsed = (instance.lastFrame() ?? "").split("\n");
     expect(collapsed.some((line) => /^ ▸ edge/.test(line))).toBe(true);
-    expect(collapsed.some((line) => line.startsWith(" ● remote-api") || line.startsWith(" ○ remote-api")))
-      .toBe(false);
+    expect(collapsed.some((line) => line.slice(0, desktop.screen.sidebar.width).includes("remote-api"))).toBe(false);
 
     // Local goes back to local panes.
     instance.stdin.write(`\u001b[<0;5;${localRow + 1}M`);
@@ -205,8 +266,8 @@ describe("Shepherd UI", () => {
     await flushApp();
 
     const frame = instance.lastFrame() ?? "";
-    expect(frame).toMatch(/╭ Fix bug ─+ × BLOCKED ╮/);
-    expect(frame).toMatch(/ AGENTS 1 +Busy/);
+    expect(frame).toMatch(/╭▎ Pi · Fix bug +! ╮/);
+    expect(frame).toMatch(/ AGENTS +1 +Busy/);
     expect(frame).toContain("   Pi");
 
     instance.unmount();
@@ -231,6 +292,66 @@ describe("Shepherd UI", () => {
     expect(subscribed.at(-1)).toEqual(["p2"]);
 
     instance.unmount();
+  });
+
+  it.each(["top", "bottom"] as const)("groups agents from the workspace summary and focuses a card (%s tabs)", async (position) => {
+    const state = { ...testState(), machines: [], focusedPaneId: "p1" };
+    const connection = new FakeConnection(state);
+    const config = defaultLoadedConfig();
+    config.config.ui.tab_bar_position = position;
+    const instance = render(<App connection={connection} config={config} />);
+    try {
+      await flushApp();
+      const screen = fixtureGeometry(config).screen;
+      const summaryY = screen.workspaceHeader!.y + 1;
+      const title = (instance.lastFrame() ?? "").split("\n")[summaryY]!;
+      const summaryX = title.indexOf("1 needs you");
+      expect(summaryX).toBeGreaterThan(screen.sidebar.width);
+      expect(instance.lastFrame()).toMatch(/ AGENTS +1 +status/);
+      instance.stdin.write(mouse(0, summaryX, summaryY));
+      instance.stdin.write(mouse(0, summaryX, summaryY, "m"));
+      await flushApp();
+      expect(instance.lastFrame()).toMatch(/ AGENTS +1 +spaces/);
+
+      const lines = (instance.lastFrame() ?? "").split("\n");
+      const agentRow = lines.findIndex((line) => /^  × claude/.test(line));
+      expect(agentRow).toBeGreaterThan(summaryY);
+      instance.stdin.write(mouse(0, 5, agentRow));
+      instance.stdin.write(mouse(0, 5, agentRow, "m"));
+      await flushApp();
+      expect(connection.requests).toContainEqual({ type: "pane.focus", paneId: "p2" });
+      expect(connection.requests.some((request) => request.type === "pane.mouse" || request.type === "surface.scroll")).toBe(false);
+    } finally { instance.unmount(); }
+  });
+
+  it.each(["top", "bottom"] as const)("creates a named tab from the footer action (%s tabs)", async (position) => {
+    const connection = new FakeConnection(testState());
+    const config = defaultLoadedConfig();
+    config.config.ui.tab_bar_position = position;
+    const instance = render(<App connection={connection} config={config} />);
+    try {
+      await flushApp();
+      const screen = fixtureGeometry(config).screen;
+      const footerY = screen.footer!.y;
+      const footer = (instance.lastFrame() ?? "").split("\n")[footerY]!;
+      const actionX = footer.indexOf("new tab");
+      const binding = config.keymap.labels.get("new_tab")![0]!.replace(/^prefix\+/, "");
+      expect(footer).toContain(`${config.keymap.prefix} commands`);
+      expect(footer).toContain(`${binding} new tab`);
+      expect(actionX).toBeGreaterThan(screen.sidebar.width);
+      instance.stdin.write(mouse(0, actionX, footerY));
+      instance.stdin.write(mouse(0, actionX, footerY, "m"));
+      await flushApp();
+      expect(instance.lastFrame()).toContain("new tab name");
+      for (const character of "verification") {
+        instance.stdin.write(character);
+        await flushApp();
+      }
+      instance.stdin.write("\r");
+      await flushApp();
+      expect(connection.requests).toContainEqual({ type: "tab.create", name: "verification" });
+      expect(connection.requests.some((request) => request.type === "pane.mouse" || request.type === "pane.input")).toBe(false);
+    } finally { instance.unmount(); }
   });
 
   it("opens the plugin picker and invokes the selected action", async () => {
@@ -278,11 +399,11 @@ describe("Shepherd UI", () => {
     const instance = render(<App connection={connection} />);
     await flushApp();
 
-    instance.stdin.write("[<0;31;6M");
+    instance.stdin.write(paneMouse(0, "p1", 3, 3));
     await flushApp();
-    instance.stdin.write("[<0;31;6m");
+    instance.stdin.write(paneMouse(0, "p1", 3, 3, "m"));
     await flushApp();
-    instance.stdin.write("[<64;31;6M");
+    instance.stdin.write(paneMouse(64, "p1", 3, 3));
     await flushApp();
 
     expect(connection.requests).toContainEqual({
@@ -302,7 +423,7 @@ describe("Shepherd UI", () => {
     const instance = render(<App connection={connection} />);
     await flushApp();
 
-    instance.stdin.write("[<0;70;6M");
+    instance.stdin.write(paneMouse(0, "p2", 5, 3));
     await flushApp();
     instance.stdin.write("");
     await flushApp();
@@ -318,19 +439,18 @@ describe("Shepherd UI", () => {
     const instance = render(<App connection={connection} />);
     await flushApp();
 
-    instance.stdin.write("[<0;64;6M");
+    instance.stdin.write(mouse(0, desktop.splits[0]!.position, desktop.content("p1").y + 3));
     await flushApp();
-    instance.stdin.write("[<32;70;6M");
+    instance.stdin.write(mouse(32, desktop.splits[0]!.position + 6, desktop.content("p1").y + 3));
     await flushApp();
-    instance.stdin.write("[<0;70;6m");
+    instance.stdin.write(mouse(0, desktop.splits[0]!.position + 6, desktop.content("p1").y + 3, "m"));
     await flushApp();
 
     const resize = connection.requests.find((request) =>
       request.type === "pane.resize-layout"
     ) as { paneId: string; delta: number } | undefined;
     expect(resize).toMatchObject({ paneId: "p1" });
-    expect(resize?.delta).toBeGreaterThan(0.07);
-    expect(resize?.delta).toBeLessThan(0.09);
+    expect(resize?.delta).toBeCloseTo(6 / desktop.splits[0]!.span);
     instance.unmount();
   });
 
@@ -339,12 +459,12 @@ describe("Shepherd UI", () => {
     const instance = render(<App connection={connection} />);
     await flushApp();
 
-    instance.stdin.write("[<0;31;2M");
+    instance.stdin.write(mouse(0, desktop.panes[0]!.rect.x + 4, desktop.panes[0]!.rect.y));
     await flushApp();
-    instance.stdin.write("[<32;71;11M");
+    instance.stdin.write(paneMouse(32, "p2", 6, 8));
     await flushApp();
     expect(instance.lastFrame() ?? "").toContain("✓ SWAP shell");
-    instance.stdin.write("[<0;71;11m");
+    instance.stdin.write(paneMouse(0, "p2", 6, 8, "m"));
     await flushApp();
     expect(instance.lastFrame() ?? "").not.toContain("✓ SWAP shell");
 
@@ -365,14 +485,14 @@ describe("Shepherd UI", () => {
     const instance = render(<App connection={connection} />);
     await flushApp();
 
-    instance.stdin.write("\u001b[<0;31;2M");
-    instance.stdin.write("\u001b[<32;71;11M");
+    instance.stdin.write(mouse(0, desktop.panes[0]!.rect.x + 4, desktop.panes[0]!.rect.y));
+    instance.stdin.write(paneMouse(32, "p2", 6, 8));
     await flushApp();
     expect(instance.lastFrame() ?? "").toContain("✓ SWAP shell");
 
     instance.stdin.write("\u001b");
     await flushApp();
-    instance.stdin.write("\u001b[<0;71;11m");
+    instance.stdin.write(paneMouse(0, "p2", 6, 8, "m"));
     await flushApp();
     expect(instance.lastFrame() ?? "").not.toContain("✓ SWAP shell");
     expect(connection.requests.some((request) => request.type === "pane.swap")).toBe(false);
@@ -387,8 +507,8 @@ describe("Shepherd UI", () => {
     await flushApp();
 
     const lines = (instance.lastFrame() ?? "").split("\n");
-    const from = lines.findIndex((line) => line.includes("production"));
-    const to = lines.findIndex((line) => line.includes("staging"));
+    const from = lines.findIndex((line) => line.slice(0, desktop.screen.sidebar.width).includes("production"));
+    const to = lines.findIndex((line) => line.slice(0, desktop.screen.sidebar.width).includes("staging"));
     expect(from).toBeGreaterThan(1);
     expect(to).toBeGreaterThan(1);
 
@@ -420,13 +540,13 @@ describe("Shepherd UI", () => {
     );
     await flushApp();
 
-    instance.stdin.write("[<0;28;3M");
+    instance.stdin.write(paneMouse(0, "p1", 0, 0));
     await flushApp();
-    instance.stdin.write("[<32;31;4M");
+    instance.stdin.write(paneMouse(32, "p1", 3, 1));
     await flushApp();
-    instance.stdin.write("[<32;32;5M");
+    instance.stdin.write(paneMouse(32, "p1", 4, 2));
     await flushApp();
-    instance.stdin.write("[<0;32;5m");
+    instance.stdin.write(paneMouse(0, "p1", 4, 2, "m"));
     await flushApp();
 
     expect(copied).toEqual(["alpha\nbeta\ngamma"]);
@@ -551,7 +671,7 @@ describe("Shepherd UI", () => {
     const instance = render(<App connection={connection} />);
     await flushApp();
 
-    instance.stdin.write("[<2;31;6M");
+    instance.stdin.write(paneMouse(2, "p1", 3, 3));
     await flushApp();
     const frame = instance.lastFrame() ?? "";
     expect(frame).toContain("Rename pane");
@@ -659,11 +779,11 @@ describe("Shepherd UI", () => {
     const instance = render(<App connection={connection} />);
     await flushApp();
 
-    instance.stdin.write("[<0;30;4M");
+    instance.stdin.write(paneMouse(0, "p1", 2, 1));
     await flushApp();
-    instance.stdin.write("[<0;30;4m");
+    instance.stdin.write(paneMouse(0, "p1", 2, 1, "m"));
     await flushApp();
-    instance.stdin.write("[<64;30;4M");
+    instance.stdin.write(paneMouse(64, "p1", 2, 1));
     await flushApp();
 
     const mouse = connection.requests.filter((request) =>
@@ -695,9 +815,9 @@ describe("Shepherd UI", () => {
     const instance = render(<App connection={connection} config={config} />);
     await flushApp();
 
-    instance.stdin.write("\x1b[<18;30;4M");
+    instance.stdin.write(paneMouse(18, "p1", 2, 1));
     await flushApp();
-    instance.stdin.write("\x1b[<18;30;4m");
+    instance.stdin.write(paneMouse(18, "p1", 2, 1, "m"));
     await flushApp();
 
     const mouse = connection.requests.filter((request) => request.type === "pane.mouse");
@@ -747,7 +867,7 @@ describe("Shepherd UI", () => {
     const frame = instance.lastFrame() ?? "";
     expect(frame).toContain("claude ready for review");
     expect(frame).toContain("production · 1");
-    expect(frame.split("\n")[0]).toContain("claude ready for review");
+    expect(frame.split("\n")[desktop.screen.tabBar!.y]).toContain("claude ready for review");
     expect(frame).toContain("alpha");
     instance.stdin.write("hello");
     await flushApp();
@@ -901,8 +1021,9 @@ describe("Shepherd UI", () => {
       await new Promise((resolve) => setTimeout(resolve, 30));
       await flushApp();
       const after = (instance.lastFrame() ?? "").split("\n");
-      const row = layout === "bottom" || layout === "sidebar" ? after.length - 1
-        : layout === "mobile" ? 1 : 0;
+      const screen = fixtureGeometry(config).screen;
+      const row = screen.tabBar?.y ?? (screen.header ? screen.header.height - 1
+        : screen.sidebar.width >= 18 ? screen.rows - 1 : 0);
       expect(after[row]).toContain("codex needs attention");
       expect(after.filter((_, index) => index !== row)).toEqual(before.filter((_, index) => index !== row));
       if (layout === "mobile") expect(after[row]).toContain("switch");
@@ -1124,7 +1245,7 @@ describe("phone-width layout", () => {
     const lines = (instance.lastFrame() ?? "").split("\n");
     expect(lines[0]).toMatch(/^ × production +tab review +│/);
     expect(lines[1]).toMatch(/^ × 1 blocked +│ +switch/);
-    expect(lines[2]).toMatch(/^╭ shell ─+╮╭ claude ─+ × BLOCKED ╮$/);
+    expect(lines[2]).toMatch(/^╭  shell +╮╭▎ claude +! Needs you ╮$/);
     expect(lines.join("\n")).not.toContain(" spaces");
     const subscribed = connection.requests.filter((request) => request.type === "surface.subscribe");
     expect(subscribed.at(-1)).toMatchObject({
@@ -1207,13 +1328,13 @@ describe("pane_gaps = false", () => {
     await flushApp();
 
     const frame = instance.lastFrame() ?? "";
-    expect(frame).toMatch(/│┌ shell ─+┬ claude ─+ × BLOCKED ┐/);
+    expect(frame).toMatch(/│┌  shell +─┬▎ claude +! ┐/);
     expect(frame).toMatch(/│└─+┴─+┘/);
-    // The left pane gives up only its right border: 37 columns less one
-    // border and the scrollbar gutter; the right pane keeps both borders.
+    // The left pane gives up only its right border; the right keeps both.
+    const geometry = fixtureGeometry(gaplessConfig());
     const subscribed = connection.requests.filter((request) => request.type === "surface.subscribe");
     expect(subscribed.at(-1)).toMatchObject({
-      panes: [{ paneId: "p1", cols: 35 }, { paneId: "p2", cols: 34 }],
+      panes: ["p1", "p2"].map((paneId) => ({ paneId, cols: geometry.content(paneId).width })),
     });
     instance.unmount();
   });
@@ -1223,17 +1344,19 @@ describe("pane_gaps = false", () => {
     const instance = render(<App connection={connection} config={gaplessConfig()} />);
     await flushApp();
 
-    // Sidebar 26 wide, left pane 37 wide: the divider is column 64.
-    instance.stdin.write("\u001b[<0;64;6M");
-    instance.stdin.write("\u001b[<32;66;6M");
-    instance.stdin.write("\u001b[<0;66;6m");
+    const geometry = fixtureGeometry(gaplessConfig());
+    const divider = geometry.splits[0]!.position;
+    const row = geometry.content("p1").y + 3;
+    instance.stdin.write(mouse(0, divider, row));
+    instance.stdin.write(mouse(32, divider + 2, row));
+    instance.stdin.write(mouse(0, divider + 2, row, "m"));
     await flushApp();
     expect(connection.requests.some((request) => request.type === "pane.resize-layout"))
       .toBe(true);
     expect(connection.requests).not.toContainEqual({ type: "pane.focus", paneId: "p1" });
 
-    instance.stdin.write("\u001b[<0;63;6M");
-    instance.stdin.write("\u001b[<0;63;6m");
+    instance.stdin.write(mouse(0, divider - 1, row));
+    instance.stdin.write(mouse(0, divider - 1, row, "m"));
     await flushApp();
     expect(connection.requests).toContainEqual({ type: "pane.focus", paneId: "p1" });
     instance.unmount();

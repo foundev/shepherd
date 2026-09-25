@@ -21,7 +21,7 @@ import {
 } from "./chrome.js";
 import { displayWidth } from "./geometry.js";
 import { sidebarStatusText } from "./sidebarTokens.js";
-import { statusBackground, statusColor, statusForeground, theme } from "./theme.js";
+import { statusColor, theme } from "./theme.js";
 import type { AgentStatus, StateView, WorkspaceView } from "../types.js";
 
 /** Width of the header's switch button and the switcher's close button. */
@@ -81,7 +81,7 @@ export function mobileHeaderRows(
     const rollup = workspaceStatus(workspace, state.panes);
     status = rightAligned(
       [
-        { text: ` ${statusIcon(rollup, options.indicators)} `, color: statusForeground[rollup], backgroundColor: statusColor[rollup], bold: true },
+        { text: ` ${statusIcon(rollup, options.indicators)} `, color: statusColor[rollup], bold: true },
         { text: workspaceLabel(workspace), color: theme.text, bold: true },
       ],
       [{ text: compactTabStatus(workspace, state.activeTabId), color: theme.overlay1 }],
@@ -101,8 +101,8 @@ export function mobileHeaderRows(
     top[1] = { ...body, text: body.text.slice(0, -1) };
     top.push({
       text: statusIcon("blocked", options.indicators),
-      color: statusForeground.blocked,
-      backgroundColor: theme.danger,
+      color: theme.danger,
+      backgroundColor: theme.surface0,
       target,
     });
   }
@@ -150,8 +150,7 @@ function agentSummary(
     if (separator) segments.push({ text: separator, color: theme.muted });
     segments.push({
       text,
-      color: index === 0 ? statusForeground[status] : statusColor[status],
-      backgroundColor: index === 0 ? statusColor[status] : statusBackground[status],
+      color: statusColor[status],
       bold: true,
       animate: status === "working" && animateWorking,
     });
@@ -176,7 +175,7 @@ export interface SwitcherDocument {
 }
 
 function section(label: string): ChromeRow {
-  return { background: theme.surface0, segments: [{ text: ` ${label}`, color: theme.brand, bold: true }] };
+  return { background: theme.surfaceDim, segments: [{ text: ` ${label}`, color: theme.subtext, bold: true }] };
 }
 
 /** Sections top to bottom: machines (with saved machines), agents,
@@ -251,17 +250,16 @@ export function switcherDocument(state: StateView, options: SwitcherOptions): Sw
           { text: "  " },
           {
             text: statusIcon(agent.pane.status, options.indicators),
-            color: statusForeground[agent.pane.status],
-            backgroundColor: statusColor[agent.pane.status],
+            color: statusColor[agent.pane.status],
             bold: true,
           },
           {
-            text: ` ${machinesMode ? "Local · " : ""}${workspaceLabel(agent.workspace)}`,
+            text: ` ${agent.pane.task?.title || agent.pane.metadataTitle || agent.pane.title || name}`,
             color: theme.text,
             bold: true,
           },
         ],
-        `  ${detail}`,
+        `  ${workspaceLabel(agent.workspace)} · ${detail}`,
         { kind: "agent", paneId: agent.pane.id },
         agent.pane.id === state.focusedPaneId ? theme.activeRow : undefined,
       );
@@ -294,7 +292,7 @@ export function switcherDocument(state: StateView, options: SwitcherOptions): Sw
       entry(
         [
           { text: `  ${connector}`, color: theme.muted },
-          { text: statusIcon(rollup, options.indicators), color: statusForeground[rollup], backgroundColor: statusColor[rollup], bold: true },
+          { text: statusIcon(rollup, options.indicators), color: statusColor[rollup], bold: true },
           { text: ` ${prefix}${entryLabel(space)}`, color: theme.text, bold: true },
         ],
         `${detailPrefix}${workspace.git?.branch || "shell"} · ${compactTabStatus(workspace)}${
