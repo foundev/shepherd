@@ -25,6 +25,8 @@ export function resumeArgv(session: AgentSession): string[] | null {
       return ["claude", "--resume", id];
     case "codex":
       return ["codex", "resume", id];
+    case "muse":
+      return ["muse", "resume", id];
     case "copilot":
       return ["copilot", `--resume=${id}`];
     case "devin":

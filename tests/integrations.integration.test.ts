@@ -21,6 +21,10 @@ describe("agent resume commands", () => {
       .toEqual(["claude", "--resume", "abc"]);
     expect(resumeArgv({ source: "shepherd:codex", agent: "codex", value: "x1" }))
       .toEqual(["codex", "resume", "x1"]);
+    expect(resumeArgv({ source: "shepherd:muse", agent: "muse", value: "m1" }))
+      .toEqual(["muse", "resume", "m1"]);
+    expect(resumeArgv({ source: "untrusted:muse", agent: "muse", value: "m1" })).toBeNull();
+    expect(resumeArgv({ source: "shepherd:muse", agent: "muse", value: "--last" })).toBeNull();
     expect(resumeArgv({ source: "shepherd:copilot", agent: "copilot", value: "s" }))
       .toEqual(["copilot", "--resume=s"]);
     expect(resumeArgv({ source: "someone:claude", agent: "claude", value: "abc" })).toBeNull();

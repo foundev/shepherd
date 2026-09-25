@@ -166,7 +166,17 @@ export const AGENTS: AgentDefinition[] = [
   agent("kiro", [command("kiro", "kiro-cli")]),
   agent("letta", [command("letta", "letta-code")]),
   agent("maki", [command("maki")]),
-  agent("muse", [command("muse", "muse-code", "muse-cli")]),
+  agent("muse", [command("muse", "muse-code", "muse-cli", "muse-bin-\\d+\\.\\d+\\.\\d+-R\\d+(?:\\.\\d+)?")], [
+    // The official launcher execs muse-bin-<version>. A fresh TUI displays
+    // this empty prompt before its first session lifecycle hooks fire.
+    rule("muse_prompt", {
+      state: "idle",
+      priority: 420,
+      region: "prompt_box_body",
+      visible: true,
+      lineRegex: [/^\s*❯\s*$/u],
+    }),
+  ]),
   agent("pi", [command("pi")]),
   agent("qodercli", [command("qodercli", "qoder")]),
   agent("qwen", [command("qwen", "qwen-code")]),

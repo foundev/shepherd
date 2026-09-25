@@ -45,6 +45,9 @@ describe("built-in agent definitions", () => {
     expect(detectAgentFromCommand("cursor-agent --resume x")).toBe("cursor");
     expect(detectAgentFromCommand("agy")).toBe("antigravity");
     expect(detectAgentFromCommand("opencode")).toBe("opencode");
+    expect(detectAgentFromCommand("/home/user/.local/bin/muse-bin-1.4.0-R4161.1 --workspace /tmp/project")).toBe("muse");
+    expect(detectAgentFromCommand("muse resume session-123")).toBe("muse");
+    expect(detectAgentFromCommand("muse-bin-unrelated")).toBeNull();
     expect(detectAgentFromCommand("npm run build")).toBeNull();
     expect(detectAgentFromCommand("piper")).toBeNull();
   });
@@ -62,6 +65,11 @@ describe("built-in agent definitions", () => {
     ["gemini", "Approve this command?\n[1] Yes [2] No", "blocked"],
     ["opencode", "Approve session update before continuing? [y/N]", "blocked"],
     ["aider", "⠋ Thinking about it", "working"],
+    ["muse", "Muse Code 1.4.0\n──────\n❯ \n──────\n  echo · /tmp/project · Auto-review", "idle"],
+    ["muse", "⠋ Thinking (esc to interrupt)\n──────\n❯ \n──────", "working"],
+    ["muse", "Allow this command? [y/N]\n──────\n❯ \n──────", "blocked"],
+    ["muse", "The response is finished.", "unknown"],
+    ["muse", "──────\n❯ unsubmitted draft\n──────", "unknown"],
   ])("%s: %j is %s", (agent, screen, expected) => {
     expect(screenState(agent, screen)).toBe(expected);
   });
