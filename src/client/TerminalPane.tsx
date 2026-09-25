@@ -1,9 +1,10 @@
 import { memo } from "react";
 import { Box, Text } from "ink";
-import { statusColor, theme } from "./theme.js";
+import { theme } from "./theme.js";
 import { terminalColor, terminalForegroundColor } from "./colors.js";
 import { displayWidth, type BorderCell, type PaneFrame } from "./geometry.js";
-import { statusIcon, truncateText } from "./chrome.js";
+import { truncateText } from "./chrome.js";
+import { StatusBadge, statusBadgeWidth } from "./indicators.js";
 import {
   selectedColumns,
   type TextSelection,
@@ -61,7 +62,7 @@ export const TerminalPane = memo(function TerminalPane({
     : null;
   const side = (cells: BorderCell[] | null, index: number) => {
     const cell = cells?.[index];
-    return cell ? { text: cell.text, color: cell.accent ? theme.brand : theme.muted } : null;
+    return cell ? { text: cell.text, color: cell.accent ? theme.brand : theme.border } : null;
   };
 
   return (
@@ -88,7 +89,7 @@ export const TerminalPane = memo(function TerminalPane({
           right={side(edges.right, index)}
           gutter={gutter
             ? thumb && index >= thumb[0] && index < thumb[1]
-              ? { text: focused ? "▐" : "▕", color: focused ? theme.overlay1 : theme.muted }
+              ? { text: focused ? "▐" : "▕", color: focused ? theme.brand : theme.overlay1 }
               : thumb
                 ? { text: "▕", color: focused ? theme.muted : theme.surfaceDim }
                 : { text: " " }
@@ -132,10 +133,8 @@ function BorderRow({
   status?: PaneView["status"] | null;
 }) {
   const width = cells.length;
-  const badge = status && width >= 24
-    ? ` ${statusIcon(status, "symbols")} ${status === "done" ? "REVIEW" : status.toUpperCase()} `
-    : "";
-  const badgeWidth = displayWidth(badge);
+  const compact = width < 24;
+  const badgeWidth = status && width >= 8 ? statusBadgeWidth(status, compact) : 0;
   const title = label && width > badgeWidth + 4
     ? ` ${truncateText(label, width - badgeWidth - 4)} `
     : "";
@@ -147,18 +146,26 @@ function BorderRow({
       else result.push({ text: cell.text, accent: cell.accent });
     }
     return result.map((run, index) => (
-      <Text key={index} color={run.accent ? theme.brand : theme.muted}>{run.text}</Text>
+      <Text key={index} color={run.accent ? theme.brand : theme.border}>{run.text}</Text>
     ));
   };
-  if (!title && !badge) return <Text>{runs(cells)}</Text>;
+  if (!title && !badgeWidth) return <Text>{runs(cells)}</Text>;
   const middleStart = 1 + displayWidth(title);
   const badgeStart = width - 1 - badgeWidth;
   return (
-    <Text>
+    <Text wrap="truncate-end">
       {runs(cells.slice(0, 1))}
-      {title && <Text color={focused ? theme.brand : theme.subtext} bold>{title}</Text>}
+      {title && (
+        <Text
+          color={focused ? theme.panelContrast : theme.subtext}
+          backgroundColor={focused ? theme.brand : theme.surfaceRaised}
+          bold={focused}
+        >
+          {title}
+        </Text>
+      )}
       {runs(cells.slice(middleStart, badgeStart))}
-      {badge && <Text color={statusColor[status!]} bold>{badge}</Text>}
+      {badgeWidth > 0 && <StatusBadge status={status!} compact={compact} />}
       {runs(cells.slice(badgeStart + badgeWidth))}
     </Text>
   );

@@ -82,9 +82,18 @@ Open work:
 
 ## Design direction
 
-Shepherd's default theme uses deep navy surfaces, a sea-glass accent, and
-separate colors and symbols for agent states. A matching light theme is
-available in settings.
+Shepherd's native React and Ink interface uses deep navy surfaces, a mint
+accent, and distinct status chips: coral for blockers, amber for activity,
+sky blue for review, and green for ready agents. Filled pane titles and sidebar
+focus rails make the active terminal clear. A matching light theme is available
+in settings, with color swatches for all nine themes.
+
+![Shepherd's native Ink interface with demonstration agents](docs/ui-preview.svg)
+
+Working indicators share one clock and update within small Ink components.
+Status labels and symbols remain readable without color, and narrow panes use
+compact badges. The same styling carries through menus, notifications, and the
+phone-width layout.
 
 Built-in themes are `shepherd`, `shepherd-day`, `aurora`, `ember`, `midnight`,
 `orchid`, `glacier`, `parchment`, and `terminal`. Each supports custom color
@@ -664,8 +673,14 @@ npm run typecheck
 npm test
 npm run build
 npm run bench-render-scale
+npm run preview-ui
 npm run dev -- server start --foreground
 ```
+
+`preview-ui` renders the actual Ink application with in-memory demonstration
+agents; it does not start a daemon. Use `-- --theme shepherd-day` to preview a
+theme, `-- --width 58 --height 32` for the phone layout, or
+`-- --svg /tmp/shepherd.svg` to export the rendered frame.
 
 The test suite covers protocol framing, layout split/removal/geometry, agent
 recognition, and blocked-state heuristics.

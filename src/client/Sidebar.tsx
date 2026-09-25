@@ -3,6 +3,7 @@ import { Box, Text } from "ink";
 import { displayWidth } from "./geometry.js";
 import { theme } from "./theme.js";
 import type { ChromeRow } from "./chrome.js";
+import { AnimatedIndicator } from "./indicators.js";
 
 /** One line of chrome: segments, padded to `width` with the row's
  * background, plus an optional trailing cell (the sidebar divider). */
@@ -27,7 +28,7 @@ export const ChromeLine = memo(function ChromeLine({
           bold={segment.bold}
           dimColor={segment.dim}
         >
-          {segment.text}
+          {segment.animate ? <AnimatedIndicator text={segment.text} /> : segment.text}
         </Text>
       ))}
       {pad > 0 ? <Text backgroundColor={row.background}>{" ".repeat(pad)}</Text> : null}
@@ -47,13 +48,13 @@ export function Sidebar({
 }) {
   if (width <= 0) return null;
   return (
-    <Box flexDirection="column" width={width} height={rows.length} overflow="hidden">
+    <Box flexDirection="column" width={width} height={rows.length} overflow="hidden" backgroundColor={theme.sidebarBg}>
       {rows.map((row, index) => (
         <ChromeLine
           key={index}
           row={row}
           width={width - 1}
-          trailing={{ text: "│", color: theme.surfaceDim }}
+          trailing={{ text: "│", color: theme.border }}
         />
       ))}
     </Box>

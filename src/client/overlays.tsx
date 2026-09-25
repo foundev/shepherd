@@ -1,5 +1,6 @@
 import { Box, Text } from "ink";
-import { theme } from "./theme.js";
+import { statusBackground, statusColor, theme } from "./theme.js";
+import { StatusBadge } from "./indicators.js";
 import type { Action, Keymap } from "../config/keybinds.js";
 import type { ToastPosition } from "../config/model.js";
 import type { AgentStatus, Rect } from "../types.js";
@@ -29,10 +30,11 @@ export function ToastStack({
   barRect: Rect;
   openLabel?: string;
 }) {
-  const width = Math.min(44, Math.max(20, columns - 4));
+  const width = Math.max(4, Math.min(44, columns - 2));
   const floating = toasts.filter((toast) => toast.position !== "bar");
   const barToasts = toasts.filter((toast) => toast.position === "bar");
   const latest = barToasts.at(-1);
+  const latestStatus = latest ? toastStatus(latest) : "unknown";
   return (
     <>
       {latest && (
@@ -42,18 +44,20 @@ export function ToastStack({
           marginTop={barRect.y}
           width={barRect.width}
           height={1}
-          backgroundColor={theme.panelBg}
+          backgroundColor={statusBackground[latestStatus]}
         >
           <Text wrap="truncate-end">
-            <Text color={latest.tone === "attention" ? theme.danger : theme.success}>
-              {` ${latest.tone === "attention" ? "!" : "✓"} `}
-            </Text>
-            <Text color={theme.text}>{latest.title}</Text>
-            <Text color={theme.muted}>
+            <StatusBadge status={latestStatus} compact />
+            <Text color={theme.text} bold>{latest.title}</Text>
+            <Text color={theme.subtext}>
               {latest.context ? ` · ${latest.context}` : ""}
               {barToasts.length > 1 ? ` · +${barToasts.length - 1}` : ""}
-              {latest.paneId && openLabel ? ` · ${openLabel} open` : ""}
             </Text>
+            {latest.paneId && openLabel && (
+              <Text color={theme.subtext}>
+                {" · "}<Text color={statusColor[latestStatus]} bold>{openLabel}</Text>{" open"}
+              </Text>
+            )}
           </Text>
         </Box>
       )}
@@ -68,11 +72,8 @@ export function ToastStack({
           : toast.position.endsWith("center")
             ? Math.max(0, Math.floor((columns - width) / 2))
             : Math.max(0, columns - width - 1);
-        const color = toast.tone === "attention"
-          ? theme.danger
-          : toast.tone === "clipboard"
-            ? theme.success
-            : theme.cyan;
+        const status = toastStatus(toast);
+        const color = statusColor[status];
         return (
           <Box
             key={toast.id}
@@ -83,22 +84,28 @@ export function ToastStack({
             height={height}
             borderStyle="round"
             borderColor={color}
-            backgroundColor={theme.surfaceRaised}
-            paddingX={1}
+            backgroundColor={theme.panelBg}
             flexDirection="column"
+            overflow="hidden"
           >
-            <Text wrap="truncate-end">
-              <Text color={color}>● </Text>
-              <Text color={theme.text} bold>{toast.title}</Text>
-            </Text>
+            <Box height={1} backgroundColor={statusBackground[status]}>
+              <Text wrap="truncate-end">
+                <StatusBadge status={status} compact />
+                <Text color={theme.text} bold>{` ${toast.title}`}</Text>
+              </Text>
+            </Box>
             {toast.context ? (
-              <Text color={theme.muted} wrap="truncate-end">{toast.context}</Text>
+              <Text color={theme.subtext} wrap="truncate-end">{`    ${toast.context}`}</Text>
             ) : null}
           </Box>
         );
       })}
     </>
   );
+}
+
+function toastStatus(toast: ToastEntry): AgentStatus {
+  return toast.status ?? (toast.tone === "attention" ? "blocked" : "done");
 }
 
 const HELP_GROUPS: Array<{ title: string; actions: Action[] }> = [
@@ -226,24 +233,33 @@ export function HelpOverlay({
       alignItems="center"
       borderStyle="round"
       borderColor={theme.brand}
-      backgroundColor={theme.surface}
+      backgroundColor={theme.panelBg}
       overflow="hidden"
     >
-      <Box flexDirection="column" width={Math.min(72, width - 4)}>
-        <Text color={theme.brand} bold>keybindings</Text>
-        <Text color={theme.muted}>
-          / {filter || "type to filter"}
-          <Text color={theme.brand}>▏</Text>
-        </Text>
+      <Box flexDirection="column" width={Math.max(1, Math.min(72, width - 4))}>
+        <Box height={1}>
+          <Text color={theme.panelContrast} backgroundColor={theme.brand} bold>{" keybindings "}</Text>
+        </Box>
+        <Box height={1} backgroundColor={theme.surfaceRaised}>
+          <Text color={theme.brand} bold>{" / "}</Text>
+          <Text color={filter ? theme.text : theme.muted} wrap="truncate-end">
+            {filter || "type to filter"}<Text color={theme.brand}>▏</Text>
+          </Text>
+        </Box>
         {visible.map((row, index) => row.group ? (
-          <Text key={index} color={theme.purple} bold>{row.group}</Text>
+          <Text key={index} color={theme.purple} bold wrap="truncate-end">{row.group}</Text>
         ) : (
-          <Box key={index} justifyContent="space-between">
-            <Text color={theme.text}>  {row.action}</Text>
-            <Text color={theme.cyan}>{row.keys}</Text>
+          <Box key={index} justifyContent="space-between" height={1} overflow="hidden">
+            <Text color={theme.text} wrap="truncate-end">  {row.action}</Text>
+            <Box flexShrink={0}>
+              <Text color={theme.cyan} backgroundColor={theme.surfaceRaised}>{` ${row.keys} `}</Text>
+            </Box>
           </Box>
         ))}
-        <Text color={theme.muted}>Esc close · ctrl+u clear filter</Text>
+        <Text color={theme.muted} wrap="truncate-end">
+          <Text color={theme.subtext}>Esc</Text>{" close · "}
+          <Text color={theme.subtext}>ctrl+u</Text>{" clear filter"}
+        </Text>
       </Box>
     </Box>
   );
@@ -266,11 +282,17 @@ export function ConfirmOverlay({
       alignItems="center"
       borderStyle="round"
       borderColor={theme.warning}
-      backgroundColor={theme.surface}
+      backgroundColor={theme.panelBg}
+      overflow="hidden"
     >
-      <Box flexDirection="column" gap={1} width={Math.min(64, width - 4)}>
-        <Text color={theme.warning} bold>{message}</Text>
-        <Text color={theme.muted}>y / Enter confirm · n / Esc cancel</Text>
+      <Box flexDirection="column" gap={1} width={Math.max(1, Math.min(64, width - 4))}>
+        <Text color={theme.text} bold>
+          <Text color={theme.panelContrast} backgroundColor={theme.warning}>{" ! "}</Text>{` ${message}`}
+        </Text>
+        <Text color={theme.subtext} wrap="truncate-end">
+          <Text color={theme.panelContrast} backgroundColor={theme.warning} bold>{" y / Enter "}</Text>
+          {" confirm · "}<Text color={theme.text} backgroundColor={theme.surfaceRaised}>{" n / Esc "}</Text>{" cancel"}
+        </Text>
       </Box>
     </Box>
   );

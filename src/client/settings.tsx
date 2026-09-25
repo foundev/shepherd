@@ -1,8 +1,9 @@
 import type { ShepherdConfig } from "../config/model.js";
 import { PALETTES } from "./palettes.js";
 import { canonicalThemeName, theme } from "./theme.js";
+import { terminalColor } from "./colors.js";
 import { centeredRect, Panel, PanelRows } from "./panels.js";
-import type { ChromeRow, Segment } from "./chrome.js";
+import { rightAligned, type ChromeRow, type Segment } from "./chrome.js";
 
 export const SETTINGS_TABS = ["theme", "indicators", "sound", "toast"] as const;
 export type SettingsTab = (typeof SETTINGS_TABS)[number];
@@ -99,12 +100,18 @@ export function SettingsOverlay({
     const style = selected
       ? { color: theme.panelContrast, backgroundColor: theme.brand, bold: true }
       : { color: theme.text };
+    const palette = settings.tab === "theme" ? PALETTES[String(option.value)] : undefined;
+    const swatches: Segment[] = palette && inner >= 32
+      ? [palette.accent, palette.red, palette.yellow, palette.green, palette.teal].map((color) => ({
+        text: " ●", color: terminalColor(color ?? undefined), bold: true, backgroundColor: theme.surface0,
+      }))
+      : [];
     return {
       background: selected ? theme.brand : undefined,
-      segments: [
+      segments: rightAligned([
         { text: option.current ? " ✓ " : "   ", ...(selected ? style : { color: theme.success }) },
         { text: option.label, ...style },
-      ],
+      ], [...swatches, { text: " " }], inner),
     };
   });
   return (

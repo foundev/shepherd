@@ -15,8 +15,9 @@ import type {
   WorkspaceView,
 } from "../types.js";
 import { displayWidth } from "./geometry.js";
-import { resolveRows, sidebarStatusText, tokenSegments } from "./sidebarTokens.js";
-import { statusColor, theme } from "./theme.js";
+import { resolveRows, sidebarStatusText, tokenSegments, type ResolvedToken, type TokenColors } from "./sidebarTokens.js";
+import { statusBadgeSegments } from "./indicators.js";
+import { statusBackground, statusColor, statusForeground, theme } from "./theme.js";
 
 /** Drop a leading activity glyph from a terminal title used in sidebar tokens. */
 function stripTitleActivity(title: string): string {
@@ -55,6 +56,8 @@ export interface Segment {
   backgroundColor?: string;
   bold?: boolean;
   dim?: boolean;
+  /** Animate this working glyph locally without redrawing the application. */
+  animate?: boolean;
   target?: ClickTarget;
 }
 
@@ -92,18 +95,19 @@ export function agentSummarySegments(state: StateView, pulse = 0): Segment[] {
   const working = count("working");
   const done = count("review");
   const unknown = count("unknown");
-  const summary = blocked > 0
-    ? { text: ` × ${blocked} NEEDS YOU `, color: theme.danger }
+  const summary: { status: AgentStatus; label: string } = blocked > 0
+    ? { status: "blocked", label: `${blocked} NEEDS YOU` }
     : done > 0
-      ? { text: ` ◇ ${done} TO REVIEW `, color: theme.cyan }
+      ? { status: "done", label: `${done} TO REVIEW` }
       : unknown > 0
-        ? { text: ` ? ${unknown} CHECK STATUS `, color: theme.muted }
+        ? { status: "unknown", label: `${unknown} CHECK STATUS` }
         : working > 0
-          ? { text: ` ${["◐", "◓", "◑", "◒"][pulse % 4]} ${working} WORKING `, color: theme.warning }
+          ? { status: "working", label: `${working} WORKING` }
         : entries.length > 0
-          ? { text: ` ○ ${entries.length} READY `, color: theme.success }
-          : { text: " ○ NO AGENTS ", color: theme.muted };
-  return [{ ...summary, backgroundColor: theme.surface0, bold: true, target: { kind: "agent-sort" } }];
+          ? { status: "idle", label: `${entries.length} READY` }
+          : { status: "unknown", label: "NO AGENTS" };
+  return statusBadgeSegments(summary.status, { label: summary.label, pulse, animate: true })
+    .map((segment) => ({ ...segment, target: { kind: "agent-sort" } }));
 }
 
 export function workspaceLabel(workspace: WorkspaceView): string {
@@ -209,6 +213,47 @@ function laneGlyph(lane: DeskLane): string {
     case "ready": return "○";
     default: return "?";
   }
+}
+
+function laneStatus(lane: DeskLane): AgentStatus {
+  switch (lane) {
+    case "review": return "done";
+    case "ready": return "idle";
+    default: return lane;
+  }
+}
+
+/** Default leading indicators become readable status chips. Configured token
+ * order and explicit text styling continue to take precedence. */
+function entryTokenSegments(
+  tokens: ResolvedToken[],
+  colors: TokenColors,
+  width: number,
+  status: AgentStatus,
+  focused: boolean,
+  stale = false,
+): Segment[] {
+  const first = tokens[0];
+  if (first?.kind !== "state_icon" || width < 8) return fit(tokenSegments(tokens, colors, width), width);
+  const segments = tokenSegments([
+    { ...first, text: ` ${first.text} ` },
+    ...tokens.slice(1),
+  ], colors, width);
+  if (segments[0]) {
+    const solid = focused && !stale && !first.style.fg && !first.style.dim;
+    const chip: Segment = {
+      ...segments[0],
+      color: first.style.fg ?? (stale ? theme.muted : solid ? statusForeground[status] : statusColor[status]),
+      backgroundColor: stale ? theme.surface0 : solid ? statusColor[status] : statusBackground[status],
+      bold: first.style.bold ?? true,
+    };
+    segments.splice(0, 1,
+      { ...chip, text: " " },
+      { ...chip, text: first.text, animate: status === "working" && first.text === "◐" && !stale },
+      { ...chip, text: " " },
+    );
+  }
+  return fit(segments, width);
 }
 
 export function truncateText(text: string, width: number): string {
@@ -418,18 +463,25 @@ function workspaceBodyRows(input: WorkspaceBodyInput): ChromeRow[] {
         secondary: focused ? theme.purple : theme.muted,
       };
     const toggle = entry.group && input.groupToggles ? entry.group : null;
+    const firstPrefixWidth = entry.child ? 6 : 1;
+    const firstContentWidth = width - firstPrefixWidth - (toggle ? 2 : 0) - 1;
+    const leadingChip = rows[0]?.[0]?.kind === "state_icon" && firstContentWidth >= 8;
     rows.forEach((tokens, rowIndex) => {
       const prefix = rowIndex > 0
-        ? "   "
+        ? " ".repeat(firstPrefixWidth + (leadingChip ? 4 : 2))
         : entry.child ? (entry.child.last ? "   └─ " : "   ├─ ") : " ";
       const reserve = rowIndex === 0 && toggle ? 2 : 0;
-      const segments = tokenSegments(
+      const segments = entryTokenSegments(
         tokens,
         colors,
         Math.max(0, width - displayWidth(prefix) - reserve - 1),
+        status,
+        focused,
+        input.stale,
       );
       const line: Segment[] = [
-        { text: prefix, color: theme.muted },
+        { text: focused || navigating ? `▌${prefix.slice(1)}` : prefix,
+          color: focused || navigating ? theme.brand : theme.muted },
         ...(input.stale ? segments.map((segment) => ({ ...segment, dim: true })) : segments),
       ];
       if (rowIndex === 0 && toggle) {
@@ -441,7 +493,7 @@ function workspaceBodyRows(input: WorkspaceBodyInput): ChromeRow[] {
           target: { kind: "group-toggle", repoKey: toggle.repoKey },
         });
       }
-      body.push({ background, target, segments: line });
+      body.push({ background, target, segments: fit(line, width) });
     });
     const next = entries[entryIndex + 1];
     if (next && !next.child) {
@@ -470,10 +522,15 @@ function machineRow(
     right.push({
       text: status === "online" || !fits ? presentation.glyph : full,
       color: presentation.color,
+      backgroundColor: status === "online"
+        ? statusBackground.idle
+        : status === "attention" ? statusBackground.blocked : theme.surface0,
+      bold: true,
     });
     right.push({ text: " " });
   }
   return {
+    background: theme.surfaceDim,
     target: { kind: "machine", id },
     segments: rightAligned(
       [
@@ -504,7 +561,8 @@ export function sidebarRows(state: StateView, options: SidebarOptions): ChromeRo
 
 function expandedRows(state: StateView, options: SidebarOptions): ChromeRow[] {
   const width = Math.max(1, options.width - 1);
-  const height = options.height;
+  const height = Math.max(0, options.height);
+  if (height === 0) return [];
   const rows: ChromeRow[] = Array.from({ length: height }, () => ({ segments: [] }));
   const spacesHeight = height < 6
     ? Math.ceil(height / 2)
@@ -517,15 +575,16 @@ function expandedRows(state: StateView, options: SidebarOptions): ChromeRow[] {
   rows[0] = {
     background: theme.surfaceRaised,
     segments: fit([
-      { text: " ◆ ", color: theme.brand, backgroundColor: theme.surfaceRaised, bold: true },
+      { text: " ◆ ", color: theme.panelContrast, backgroundColor: theme.brand, bold: true },
       { text: "SHEPHERD", color: theme.text, backgroundColor: theme.surfaceRaised, bold: true },
     ], width),
   };
   rows[1] = {
+    background: theme.surfaceDim,
     segments: rightAligned(
-      [{ text: machinesMode ? " MACHINES" : " SPACES", color: theme.subtext, bold: true }],
+      [{ text: machinesMode ? " MACHINES" : " SPACES", color: theme.brand, bold: true }],
       [{ text: ` ${machinesMode ? state.machines.length + 1 : state.workspaces.length} `,
-        color: theme.brand, bold: true }],
+        color: theme.brand, backgroundColor: theme.activeRow, bold: true }],
       width,
     ),
   };
@@ -593,8 +652,8 @@ function expandedRows(state: StateView, options: SidebarOptions): ChromeRow[] {
   if (options.mouse && footerRow > 0) {
     rows[footerRow] = {
       segments: rightAligned(
-        [{ text: " new", color: theme.muted, target: { kind: "new-workspace" } }],
-        [{ text: "menu", color: theme.muted, target: { kind: "menu" } }],
+        [{ text: " + new", color: theme.brand, bold: true, target: { kind: "new-workspace" } }],
+        [{ text: "menu", color: theme.subtext, target: { kind: "menu" } }],
         width,
       ),
     };
@@ -609,13 +668,18 @@ function expandedRows(state: StateView, options: SidebarOptions): ChromeRow[] {
   const grouped = normalizeAgentSort(options.sort) === "status" && !state.agentView?.sort.length;
   if (agentsTop + 1 < height) {
     rows[agentsTop + 1] = {
+      background: theme.surfaceDim,
       segments: rightAligned(
-        [{ text: ` AGENTS ${agents.length}`, color: theme.subtext, bold: true, target: { kind: "agent-sort" } }],
+        [
+          { text: " AGENTS ", color: theme.brand, bold: true, target: { kind: "agent-sort" } },
+          { text: String(agents.length), color: theme.brand, backgroundColor: theme.activeRow, bold: true,
+            target: { kind: "agent-sort" } },
+        ],
         [state.agentView
           ? { text: state.agentView.label ?? "view", color: theme.brand, bold: true }
           : {
             text: grouped ? "status" : "spaces",
-            color: theme.muted,
+            color: theme.subtext,
             bold: true,
             target: { kind: "agent-sort" },
           }],
@@ -650,15 +714,19 @@ function expandedRows(state: StateView, options: SidebarOptions): ChromeRow[] {
       stateIcon: statusColor[pane.status],
       stateText: statusColor[pane.status],
       workspace: { color: focused ? theme.text : theme.subtext, bold: true },
-      secondary: theme.muted,
+      secondary: focused ? theme.subtext : theme.muted,
     };
+    const leadingChip = tokenRows[0]?.[0]?.kind === "state_icon" && width - 1 >= 8;
     (tokenRows.length > 0 ? tokenRows : [[{ kind: "state_icon" as const, text: statusIcon(pane.status, options.indicators), style: {} }]])
       .forEach((tokens, rowIndex) => {
-        const indent = rowIndex === 0 ? " " : "   ";
+        const indent = rowIndex === 0 ? " " : leadingChip ? "     " : "   ";
         agentRows.push({
           background,
           target,
-          segments: [{ text: indent }, ...tokenSegments(tokens, colors, width - indent.length)],
+          segments: fit([
+            { text: focused ? `▌${indent.slice(1)}` : indent, color: theme.brand },
+            ...entryTokenSegments(tokens, colors, width - indent.length, pane.status, focused),
+          ], width),
         });
       });
   };
@@ -667,11 +735,14 @@ function expandedRows(state: StateView, options: SidebarOptions): ChromeRow[] {
       const group = agents.filter((entry) => deskLane(entry.pane) === lane);
       if (group.length === 0) continue;
       if (agentRows.length > 0) agentRows.push({ segments: [] });
+      const status = laneStatus(lane);
       agentRows.push({
-        segments: fit([
-          { text: ` ${laneGlyph(lane)} ${LANE_LABELS[lane]}`, color: laneColor(lane), bold: true },
-          { text: ` ${group.length}`, color: theme.muted },
-        ], width),
+        background: statusBackground[status],
+        segments: rightAligned(
+          [{ text: ` ${laneGlyph(lane)} ${LANE_LABELS[lane]}`, color: laneColor(lane), bold: true }],
+          [{ text: ` ${group.length} `, color: statusForeground[status], backgroundColor: statusColor[status], bold: true }],
+          width,
+        ),
       });
       group.forEach((entry, index) => {
         pushAgent(entry);
@@ -726,28 +797,36 @@ function expandedRows(state: StateView, options: SidebarOptions): ChromeRow[] {
       };
     }
   }
-  return rows;
+  return rows.slice(0, height);
 }
 
 /** Shepherd's collapsed rail: numbered workspaces and agents with status
  * icons, and a » toggle on the bottom row. */
 function compactRows(state: StateView, options: SidebarOptions): ChromeRow[] {
   const width = Math.max(1, options.width - 1);
-  const height = options.height;
+  const height = Math.max(0, options.height);
   const rows: ChromeRow[] = Array.from({ length: height }, () => ({ segments: [] }));
   const split = height >= 7 ? Math.ceil(height / 2) : height - 1;
   const compactItems: ChromeRow[] = state.workspaces.map((workspace, index) => {
     const focused = workspace.id === options.activeWorkspaceId && !options.selectedRemote;
     const status = workspaceStatus(workspace, state.panes);
     return {
+      background: focused ? theme.activeRow : undefined,
       target: { kind: "workspace", id: workspace.id },
       segments: [
         {
           text: String(index + 1).padEnd(2).slice(0, 2),
-          color: focused ? theme.text : theme.muted,
+          color: focused ? theme.brand : theme.subtext,
           backgroundColor: focused ? theme.activeRow : undefined,
+          bold: focused,
         },
-        { text: statusIcon(status, options.indicators), color: statusColor[status] },
+        {
+          text: statusIcon(status, options.indicators),
+          color: focused ? statusForeground[status] : statusColor[status],
+          backgroundColor: focused ? statusColor[status] : statusBackground[status],
+          bold: true,
+          animate: status === "working" && options.indicators === "symbols",
+        },
       ],
     };
   });
@@ -756,14 +835,16 @@ function compactRows(state: StateView, options: SidebarOptions): ChromeRow[] {
     const presentation = machineStatusPresentation(machine.status);
     const selected = options.selectedRemote?.machineId === machine.id;
     compactItems.push({
+      background: selected ? theme.activeRow : undefined,
       target: { kind: "machine", id: machine.id },
       segments: [
         {
           text: `M${index + 1}`.slice(0, 2),
-          color: selected ? theme.text : theme.muted,
+          color: selected ? theme.brand : theme.subtext,
           backgroundColor: selected ? theme.activeRow : undefined,
+          bold: selected,
         },
-        { text: presentation.glyph, color: presentation.color },
+        { text: presentation.glyph, color: presentation.color, bold: true },
       ],
     });
   });
@@ -775,14 +856,22 @@ function compactRows(state: StateView, options: SidebarOptions): ChromeRow[] {
     agentEntries(state, options.sort).slice(0, height - split - 2).forEach((entry, index) => {
       const focused = entry.pane.id === options.focusedPaneId;
       rows[split + 1 + index] = {
+        background: focused ? theme.activeRow : undefined,
         target: { kind: "agent", paneId: entry.pane.id },
         segments: [
           {
             text: String(index + 1).padEnd(2).slice(0, 2),
-            color: focused ? theme.text : theme.muted,
+            color: focused ? theme.brand : theme.subtext,
             backgroundColor: focused ? theme.activeRow : undefined,
+            bold: focused,
           },
-          { text: statusIcon(entry.pane.status, options.indicators), color: statusColor[entry.pane.status] },
+          {
+            text: statusIcon(entry.pane.status, options.indicators),
+            color: focused ? statusForeground[entry.pane.status] : statusColor[entry.pane.status],
+            backgroundColor: focused ? statusColor[entry.pane.status] : statusBackground[entry.pane.status],
+            bold: true,
+            animate: entry.pane.status === "working" && options.indicators === "symbols",
+          },
         ],
       };
     });
@@ -796,7 +885,7 @@ function compactRows(state: StateView, options: SidebarOptions): ChromeRow[] {
       ],
     };
   }
-  return rows;
+  return rows.slice(0, height).map((row) => ({ ...row, segments: fit(row.segments, width) }));
 }
 
 /** Target under column `x` of a row (x relative to the row start). */
@@ -847,8 +936,8 @@ export function tabBarRow(tabs: TabView[], options: TabBarOptions): ChromeRow {
     const padding = item.width - displayWidth(item.label);
     const left = Math.floor(padding / 2);
     const style = focused
-      ? { color: theme.panelContrast, backgroundColor: theme.brand, bold: item.custom }
-      : { color: item.custom ? theme.overlay1 : theme.muted, backgroundColor: theme.surface0 };
+      ? { color: theme.panelContrast, backgroundColor: theme.brand, bold: true }
+      : { color: item.custom ? theme.subtext : theme.muted, backgroundColor: theme.surfaceDim };
     return [
       {
         text: `${" ".repeat(left)}${item.label}${" ".repeat(padding - left)}`,
@@ -883,8 +972,9 @@ export function tabBarRow(tabs: TabView[], options: TabBarOptions): ChromeRow {
     }
     segments.push({
       text: " < ",
-      color: first > 0 ? theme.overlay1 : theme.muted,
+      color: first > 0 ? theme.brand : theme.muted,
       backgroundColor: theme.surface0,
+      bold: first > 0,
       target: { kind: "tabs-left" },
     });
     segments.push({ text: first > 0 ? "…" : " ", color: theme.muted, backgroundColor: theme.panelBg });
@@ -892,16 +982,18 @@ export function tabBarRow(tabs: TabView[], options: TabBarOptions): ChromeRow {
     segments.push({ text: last < items.length - 1 ? "…" : " ", color: theme.muted, backgroundColor: theme.panelBg });
     segments.push({
       text: " > ",
-      color: last < items.length - 1 ? theme.overlay1 : theme.muted,
+      color: last < items.length - 1 ? theme.brand : theme.muted,
       backgroundColor: theme.surface0,
+      bold: last < items.length - 1,
       target: { kind: "tabs-right" },
     });
   }
   if (options.mouse) {
     segments.push({
       text: " + ",
-      color: theme.overlay1,
-      backgroundColor: theme.panelBg,
+      color: theme.brand,
+      backgroundColor: theme.surface0,
+      bold: true,
       target: { kind: "new-tab" },
     });
   }
