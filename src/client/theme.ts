@@ -60,10 +60,14 @@ function statusSurface(background: string | null, foreground: string | null): st
   return `#${channels.join("")}`;
 }
 
-function chipForeground(color: string | null): string {
+function chipForeground(color: string): string {
   // Choose whichever has the higher contrast, including for custom palettes.
-  if (color?.startsWith("#")) return luminance(color) > 0.179 ? "#000000" : "#ffffff";
-  return color === "blue" || color === "red" || color === "magenta" ? "white" : "black";
+  if (color.startsWith("#")) return luminance(color) > 0.179 ? "#000000" : "#ffffff";
+  // ANSI entries belong to the terminal. Use their conventional dark/bright
+  // identities without replacing the user's palette with fixed RGB values.
+  return ["black", "red", "green", "blue", "magenta", "cyan", "blueBright"].includes(color)
+    ? "white"
+    : "black";
 }
 
 export const THEME_ALIASES: Record<string, string> = {
@@ -156,15 +160,17 @@ export function applyTheme(
   }
 
   const statusPalette = {
-    blocked: palette.red,
-    working: palette.yellow,
-    done: palette.teal,
-    idle: palette.green,
-    unknown: palette.overlay0,
+    blocked: palette.red ?? "red",
+    working: palette.yellow ?? "yellow",
+    done: palette.teal ?? "cyan",
+    idle: palette.green ?? "green",
+    unknown: palette.overlay0 ?? "gray",
   };
   for (const [status, foreground] of Object.entries(statusPalette)) {
-    statusBackground[status] = terminalColor(statusSurface(palette.panel_bg, foreground) ?? palette.surface0 ?? "gray")!;
-    statusForeground[status] = terminalColor(chipForeground(foreground))!;
+    const contrast = chipForeground(foreground);
+    const background = statusSurface(palette.panel_bg, foreground) ?? palette.surface0 ?? contrast;
+    statusBackground[status] = terminalColor(background === foreground ? contrast : background)!;
+    statusForeground[status] = terminalColor(contrast)!;
   }
 
   for (const key of Object.keys(palette) as Array<keyof ThemePalette>) {

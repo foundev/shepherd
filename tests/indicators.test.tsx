@@ -3,7 +3,7 @@ import { stripVTControlCharacters } from "node:util";
 import { Box, Text, renderToString } from "ink";
 import { render } from "ink-testing-library";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { AnimatedIndicator, StatusBadge } from "../src/client/indicators.js";
+import { AnimatedIndicator, StatusBadge, statusBadgeSegments } from "../src/client/indicators.js";
 import { configureTerminalColors } from "../src/client/colors.js";
 import { applyTheme, statusBackground, statusColor, statusForeground } from "../src/client/theme.js";
 import { PALETTES } from "../src/client/palettes.js";
@@ -59,6 +59,43 @@ describe("native Ink indicators", () => {
       expect(statusForeground.blocked).toBe("ansi256(231)");
       expect(statusForeground.working).toBe("ansi256(16)");
     } finally { restore(); }
+  });
+
+  it.each([
+    ["black", "white"], ["red", "white"], ["green", "white"],
+    ["blue", "white"], ["magenta", "white"], ["cyan", "white"],
+    ["gray", "black"], ["yellow", "black"], ["white", "black"],
+    ["lightred", "black"], ["lightgreen", "black"], ["lightyellow", "black"],
+    ["lightblue", "white"], ["lightmagenta", "black"], ["lightcyan", "black"],
+  ])("keeps solid status chips legible with the named color %s", (color, foreground) => {
+    applyTheme("shepherd", { red: color });
+    const [icon] = statusBadgeSegments("blocked", { compact: true });
+    expect(icon?.color).toBe(foreground);
+    expect(icon?.color).not.toBe(icon?.backgroundColor);
+  });
+
+  it("keeps terminal-palette badge labels visible, including unknown status", () => {
+    applyTheme("terminal");
+    for (const status of statuses) {
+      for (const segment of statusBadgeSegments(status)) {
+        expect(segment.color).not.toBe(segment.backgroundColor);
+      }
+    }
+    expect(statusBackground.unknown).toBe("black");
+    expect(statusColor.unknown).toBe("gray");
+  });
+
+  it("chooses contrast from effective fallback colors when overrides reset status tokens", () => {
+    applyTheme("shepherd", { red: "default", yellow: "reset", teal: "none", green: "transparent", overlay0: "default" });
+    expect(statusColor).toMatchObject({ blocked: "red", working: "yellow", done: "cyan", idle: "green", unknown: "gray" });
+    expect(statusForeground).toMatchObject({ blocked: "white", working: "black", done: "white", idle: "white", unknown: "black" });
+  });
+
+  it("avoids drawing status text on an identical custom surface", () => {
+    applyTheme("shepherd", { overlay0: "gray", surface0: "gray" });
+    const [, label] = statusBadgeSegments("unknown");
+    expect(label?.color).toBe("gray");
+    expect(label?.backgroundColor).toBe("black");
   });
 
   it("shares one activity clock, updates only indicator leaves, and stops after unmount", async () => {
