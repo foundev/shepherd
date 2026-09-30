@@ -24,4 +24,6 @@ jobs:
       - run: npm install -g npm@latest
       # No NODE_AUTH_TOKEN: auth comes from the GitHub OIDC token via the
       # trusted publisher configured on npmjs.com for this repo + workflow.
-      - run: npm publish --provenance --access public
+      # No --provenance: Sigstore provenance requires a public source repo
+      # and foundev/shepherd is private. Re-add it if the repo goes public.
+      - run: npm publish --access public

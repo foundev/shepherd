@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -23,7 +23,11 @@ describe("packaging", () => {
     const targets = Object.values(pkg.bin ?? {});
     expect(targets.length).toBeGreaterThan(0);
     for (const target of targets) {
-      expect(shipped(target.replace(/^\.\//, ""), files)).toBe(true);
+      expect(shipped(target, files)).toBe(true);
+      // The target must exist on disk: npm only warns (it does not fail)
+      // when a bin entry needs normalizing, so a dangling target would
+      // ship a broken CLI with nothing but a warning in the log.
+      expect(existsSync(resolve(root, target))).toBe(true);
     }
   });
 

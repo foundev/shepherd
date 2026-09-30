@@ -1,11 +1,11 @@
 {
   "name": "@foundev/shepherd",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "A modern React and Ink terminal runtime for coding agents",
   "type": "module",
   "license": "Apache-2.0",
   "bin": {
-    "shepherd": "./bin/shepherd"
+    "shepherd": "bin/shepherd"
   },
   "files": [
     "bin",
