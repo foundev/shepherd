@@ -2,24 +2,10 @@
  * node-pty cannot adopt an existing fd, so this wraps the fd the same way
  * node-pty does internally (a net.Socket over a pipe handle) and resizes
  * through node-pty's native binding. */
-import { createRequire } from "node:module";
 import net from "node:net";
+import { ptyBinding } from "./ptyNative.js";
 
 type Listener<T> = (value: T) => void;
-
-interface PtyBinding {
-  resize(fd: number, cols: number, rows: number): void;
-}
-
-const nodeRequire = createRequire(import.meta.url);
-
-function binding(): PtyBinding {
-  try {
-    return nodeRequire("node-pty/build/Release/pty.node") as PtyBinding;
-  } catch {
-    return nodeRequire("node-pty/build/Debug/pty.node") as PtyBinding;
-  }
-}
 
 function socketForFd(fd: number): net.Socket {
   const internal = (process as unknown as {
@@ -80,7 +66,8 @@ export class AdoptedPty {
     if (this.exited) return;
     this.cols = cols;
     this.rows = rows;
-    binding().resize(this.fd, cols, rows);
+    // The native call takes pixel dimensions too; 0 means unknown.
+    ptyBinding().resize(this.fd, cols, rows, 0, 0);
   }
 
   kill(signal = "SIGHUP"): void {

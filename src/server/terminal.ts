@@ -2,7 +2,7 @@ import { execFile, execFileSync } from "node:child_process";
 import fs from "node:fs";
 import { createRequire } from "node:module";
 import { promisify } from "node:util";
-import pty from "node-pty";
+import pty from "@lydell/node-pty";
 import { ANSI_COLORS } from "../ansiColors.js";
 import type {
   AgentStatus,
@@ -15,6 +15,7 @@ import type {
 import { detectAgentFromCommand } from "./detection/agents.js";
 import { AgentDetector } from "./detection/detector.js";
 import { AdoptedPty } from "./adoptedPty.js";
+import { repairSpawnHelper } from "./ptyNative.js";
 import { KittyKeyboardState } from "./kittyKeyboard.js";
 import { MetadataStore } from "./metadata.js";
 import type { DetectionInput } from "./detection/engine.js";
@@ -179,6 +180,7 @@ export class PaneTerminal {
       this.ptyProcess = new AdoptedPty(options.adopt.fd, options.adopt.pid, cols, rows);
     } else {
       const shell = paneShell(this.command, options.shell);
+      repairSpawnHelper();
       this.ptyProcess = pty.spawn(shell.file, shell.args, {
         name: "xterm-256color",
         cwd: options.cwd,

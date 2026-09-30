@@ -35,7 +35,9 @@ jobs:
         with:
           node-version: ${{ matrix.node }}
           cache: npm
-      - run: npm ci
+      # --ignore-scripts installs the way npm 12, pnpm and Bun do by default,
+      # so a dependency that needs an install script or a compile fails here.
+      - run: npm ci --ignore-scripts
       - name: Configure git for worktree tests
         run: |
           git config --global user.email ci@example.com

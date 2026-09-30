@@ -30,11 +30,11 @@
     "node": ">=22"
   },
   "dependencies": {
+    "@lydell/node-pty": "1.2.0-beta.15",
     "@xterm/headless": "^5.5.0",
     "chalk": "^5.6.2",
     "commander": "^14.0.1",
     "ink": "^6.2.0",
-    "node-pty": "1.0.0",
     "react": "^19.1.0",
     "smol-toml": "^1.8.0"
   },
@@ -45,8 +45,5 @@
     "tsx": "^4.20.0",
     "typescript": "^5.9.2",
     "vitest": "5.0.1"
-  },
-  "allowScripts": {
-    "node-pty@1.0.0": true
   }
 }

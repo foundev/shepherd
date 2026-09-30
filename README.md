@@ -28,7 +28,7 @@ Implemented:
 - persistent detached daemon
 - Unix socket / Windows named-pipe transport
 - newline-delimited JSON protocol
-- real PTY ownership through `node-pty`
+- real PTY ownership through `node-pty` (prebuilt, no native compile)
 - terminal parsing and screen retention through `@xterm/headless`
 - true-color and styled terminal rendering in Ink
 - workspaces
@@ -140,13 +140,12 @@ npm run build
 
 Node 22 or newer is required.
 
-If your npm security policy blocks native package scripts, approve and rebuild
-the PTY dependency:
-
-```bash
-npm install-scripts approve node-pty@1.0.0
-npm rebuild node-pty
-```
+Installing compiles nothing and runs no install scripts: the PTY layer
+(`node-pty`, via `@lydell/node-pty`) ships prebuilt binaries for macOS, Linux
+and Windows on x64 and arm64, so no compiler, Python or Visual Studio is
+needed. Linux needs glibc 2.28 or newer (musl/Alpine is not supported), and
+Windows needs Windows 10 1809 or newer for ConPTY. If you install with
+`--omit=optional`, drop that flag: the binaries are optional dependencies.
 
 ## Run
 
