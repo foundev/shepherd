@@ -8,6 +8,7 @@ const pkg = JSON.parse(readFileSync(resolve(root, "package.json"), "utf8")) as {
   bin?: Record<string, string>;
   files?: string[];
   scripts?: Record<string, string>;
+  repository?: { url?: string };
 };
 
 // npm `files` is an allowlist: a path ships when it or a parent dir is listed.
@@ -33,5 +34,12 @@ describe("packaging", () => {
 
   it("rebuilds dist before every publish", () => {
     expect(pkg.scripts?.prepublishOnly ?? "").toContain("build");
+  });
+
+  it("declares the source repository (required for --provenance)", () => {
+    // Sigstore provenance verification rejects the publish when
+    // repository.url doesn't match the GitHub source repo.
+    const url: string = pkg.repository?.url ?? "";
+    expect(url).toContain("github.com/foundev/shepherd");
   });
 });
