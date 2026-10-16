@@ -13,7 +13,7 @@ import { configureTerminalColors } from "./client/colors.js";
 import { loadConfig } from "./config/model.js";
 import { DEFAULT_CONFIG_TEXT } from "./config/defaultText.js";
 import { decodeStream, encodeMessage } from "./protocol.js";
-import { connect, ensureDaemon, socketPath } from "./transport.js";
+import { connect, defaultSocketPath, ensureDaemon, socketPath } from "./transport.js";
 import { apiSchema } from "./apiSchema.js";
 import { stateDirectory } from "./server/persistence.js";
 import {
@@ -301,7 +301,7 @@ session
       }
     }
     if (info.running && options.stop) await stopSession(info.socketPath);
-    fs.rmSync(path.dirname(info.socketPath), { recursive: true, force: true });
+    fs.rmSync(path.dirname(info.statePath), { recursive: true, force: true });
     process.stdout.write(
       `${JSON.stringify({ name, deleted: true })}\n`,
     );
@@ -1745,14 +1745,19 @@ async function listSessions(): Promise<SessionInfo[]> {
     if (!entry.isDirectory() || !validateSessionName(entry.name)) continue;
     const directory = path.join(root, entry.name);
     const stateFile = path.join(directory, "state.json");
-    const daemonSocket = path.join(directory, "daemon.sock");
-    if (!fs.existsSync(stateFile) && !fs.existsSync(daemonSocket)) continue;
+    // On Windows the daemon listens on a named pipe, not a file in the
+    // session directory.
+    const daemonSocket = process.platform === "win32"
+      ? defaultSocketPath(entry.name)
+      : path.join(directory, "daemon.sock");
+    const hasSocket = process.platform === "win32" || fs.existsSync(daemonSocket);
+    if (!fs.existsSync(stateFile) && !hasSocket) continue;
 
     let running = false;
     let serverPid: number | null = null;
     let workspaces = 0;
     let panes = 0;
-    if (fs.existsSync(daemonSocket)) {
+    if (hasSocket) {
       try {
         const socket = await connect(daemonSocket, 250);
         const connection = ClientConnection.open(socket);

@@ -27,7 +27,9 @@ describe("named sessions", () => {
     expect(JSON.parse(list.stdout)).toEqual([{
       name: "alpha",
       statePath: path.join(alpha, "state.json"),
-      socketPath: path.join(alpha, "daemon.sock"),
+      socketPath: process.platform === "win32"
+        ? `\\\\.\\pipe\\shepherd-${os.userInfo().username.replace(/[^a-zA-Z0-9]/g, "-")}-alpha`
+        : path.join(alpha, "daemon.sock"),
       running: false,
       serverPid: null,
       workspaces: 0,

@@ -17,7 +17,7 @@ describe("Git worktree integration", () => {
 
   beforeAll(async () => {
     stateRoot = fs.mkdtempSync(path.join(os.tmpdir(), "shepherd-worktrees-"));
-    stateRoot = fs.realpathSync(stateRoot);
+    stateRoot = fs.realpathSync.native(stateRoot);
     repositoryRoot = path.join(stateRoot, "repository");
     worktreePath = path.join(stateRoot, "feature-worktree");
     socketPath = path.join(stateRoot, "daemon.sock");
@@ -38,7 +38,7 @@ describe("Git worktree integration", () => {
   afterAll(async () => {
     connection.close();
     await daemon.stop();
-    fs.rmSync(stateRoot, { recursive: true, force: true });
+    fs.rmSync(stateRoot, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   });
 
   it("lists, creates, opens, and removes workspaces backed by worktrees", async () => {

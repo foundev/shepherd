@@ -1041,7 +1041,9 @@ describe("Shepherd UI", () => {
     state.focusedPaneId = "p1";
     const connection = new FakeConnection(state);
     const config = defaultLoadedConfig();
-    config.config.ui.toast.delay_seconds = 0.05;
+    // Long enough that the three reports below land inside one delay window
+    // even on a slow CI runner.
+    config.config.ui.toast.delay_seconds = 0.5;
     const sound = vi.spyOn(notifications, "playSound").mockImplementation(() => {});
     const instance = render(<App connection={connection} config={config} />);
     const report = async (status: "blocked" | "working", previous: string) => {
@@ -1057,7 +1059,7 @@ describe("Shepherd UI", () => {
       await report("blocked", "working");
       await report("working", "blocked");
       await report("blocked", "working");
-      await new Promise((resolve) => setTimeout(resolve, 100));
+      await new Promise((resolve) => setTimeout(resolve, 700));
       await flushApp();
       expect(sound).toHaveBeenCalledTimes(1);
       expect(instance.lastFrame()).toContain("codex needs attention");

@@ -1,5 +1,6 @@
 import net from "node:net";
 import { spawn } from "node:child_process";
+import { createHash } from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -8,6 +9,11 @@ import { fileURLToPath } from "node:url";
 export function socketPath(session = "default"): string {
   const override = process.env.SHEPHERD_SOCKET_PATH;
   if (override) return override;
+  return defaultSocketPath(session);
+}
+
+/** A session's daemon address, ignoring SHEPHERD_SOCKET_PATH. */
+export function defaultSocketPath(session: string): string {
   if (process.platform === "win32") {
     const user = os.userInfo().username.replace(/[^a-zA-Z0-9]/g, "-");
     return `\\\\.\\pipe\\shepherd-${user}-${session}`;
@@ -22,12 +28,30 @@ export function socketPath(session = "default"): string {
   );
 }
 
+const PIPE_PREFIX = "\\\\.\\pipe\\";
+
+/** The address to listen on or connect to for a socket path. Windows has no
+ * Unix domain sockets on the filesystem, so a file path such as
+ * `<state>/daemon.sock` maps to a named pipe derived from that path; both
+ * sides of a connection reach the same pipe through this function. */
+export function ipcPath(pathName: string, platform = process.platform): string {
+  if (platform !== "win32" || pathName.startsWith(PIPE_PREFIX)) return pathName;
+  const resolved = path.win32.resolve(pathName).toLowerCase();
+  const digest = createHash("sha256").update(resolved).digest("hex").slice(0, 32);
+  return `${PIPE_PREFIX}shepherd-${digest}`;
+}
+
+/** Whether a socket path is a filesystem entry that can be stat'ed or unlinked. */
+export function isFilesystemSocket(pathName: string, platform = process.platform): boolean {
+  return ipcPath(pathName, platform) === pathName && !pathName.startsWith(PIPE_PREFIX);
+}
+
 export function connect(
   pathName: string,
   timeoutMs = 1_500,
 ): Promise<net.Socket> {
   return new Promise((resolve, reject) => {
-    const socket = net.createConnection({ path: pathName });
+    const socket = net.createConnection({ path: ipcPath(pathName) });
     const timer = setTimeout(() => {
       socket.destroy();
       reject(new Error(`timed out connecting to ${pathName}`));

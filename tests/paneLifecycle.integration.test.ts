@@ -7,17 +7,24 @@ import { ShepherdDaemon } from "../src/server/daemon.js";
 import { paneIds } from "../src/server/layout.js";
 import { connect } from "../src/transport.js";
 import type { StateView } from "../src/types.js";
+import { missingPosixShell, paneTestTimeout, paneWaitMs, windowsShellConfig } from "./shellFixture.js";
 
-describe("pane lifecycle", () => {
+// Pane commands are POSIX shell, so Windows uses Git Bash.
+describe.skipIf(missingPosixShell)("pane lifecycle", { timeout: paneTestTimeout }, () => {
   let stateRoot: string;
   let socketPath: string;
   let daemon: ShepherdDaemon;
   let connection: ClientConnection;
+  const savedConfig = process.env.SHEPHERD_CONFIG_PATH;
 
   beforeAll(async () => {
     stateRoot = fs.mkdtempSync(path.join(os.tmpdir(), "shepherd-lifecycle-"));
     socketPath = path.join(stateRoot, "daemon.sock");
     process.env.SHEPHERD_STATE_HOME = stateRoot;
+    if (windowsShellConfig()) {
+      process.env.SHEPHERD_CONFIG_PATH = path.join(stateRoot, "config.toml");
+      fs.writeFileSync(process.env.SHEPHERD_CONFIG_PATH, windowsShellConfig());
+    }
     daemon = new ShepherdDaemon({ session: "lifecycle", socketPath });
     await daemon.start();
     connection = ClientConnection.open(await connect(socketPath));
@@ -26,6 +33,8 @@ describe("pane lifecycle", () => {
   afterAll(async () => {
     connection.close();
     await daemon.stop();
+    if (savedConfig === undefined) delete process.env.SHEPHERD_CONFIG_PATH;
+    else process.env.SHEPHERD_CONFIG_PATH = savedConfig;
     fs.rmSync(stateRoot, { recursive: true, force: true });
   });
 
@@ -36,7 +45,7 @@ describe("pane lifecycle", () => {
   async function waitForState(
     check: (state: StateView) => boolean,
   ): Promise<StateView> {
-    for (let attempt = 0; attempt < 80; attempt += 1) {
+    for (let attempt = 0; attempt < paneWaitMs / 50; attempt += 1) {
       const state = await request({ type: "state.get" });
       if (check(state)) return state;
       await new Promise((resolve) => setTimeout(resolve, 50));

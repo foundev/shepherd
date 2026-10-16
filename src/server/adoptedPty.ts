@@ -13,12 +13,24 @@ interface PtyBinding {
 
 const nodeRequire = createRequire(import.meta.url);
 
+// Same lookup order as node-pty's own loader: a local build first, then the
+// prebuilt binary it ships for macOS and Windows.
+const BINDING_PATHS = [
+  "node-pty/build/Release/pty.node",
+  "node-pty/build/Debug/pty.node",
+  `node-pty/prebuilds/${process.platform}-${process.arch}/pty.node`,
+];
+
 function binding(): PtyBinding {
-  try {
-    return nodeRequire("node-pty/build/Release/pty.node") as PtyBinding;
-  } catch {
-    return nodeRequire("node-pty/build/Debug/pty.node") as PtyBinding;
+  let lastError: unknown;
+  for (const path of BINDING_PATHS) {
+    try {
+      return nodeRequire(path) as PtyBinding;
+    } catch (error) {
+      lastError = error;
+    }
   }
+  throw lastError;
 }
 
 function socketForFd(fd: number): net.Socket {

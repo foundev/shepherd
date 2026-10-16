@@ -1,6 +1,7 @@
 import { execFile, execFileSync } from "node:child_process";
 import fs from "node:fs";
 import { createRequire } from "node:module";
+import path from "node:path";
 import { promisify } from "node:util";
 import pty from "node-pty";
 import { ANSI_COLORS } from "../ansiColors.js";
@@ -17,6 +18,7 @@ import { AgentDetector } from "./detection/detector.js";
 import { AdoptedPty } from "./adoptedPty.js";
 import { KittyKeyboardState } from "./kittyKeyboard.js";
 import { MetadataStore } from "./metadata.js";
+import { ensureSpawnHelperExecutable } from "./ptyHelper.js";
 import type { DetectionInput } from "./detection/engine.js";
 import type { DetectedState } from "./detection/manifest.js";
 
@@ -27,6 +29,7 @@ type HeadlessTerminal = InstanceType<HeadlessTerminalConstructor>;
 
 const nodeRequire = createRequire(import.meta.url);
 const execFileAsync = promisify(execFile);
+ensureSpawnHelperExecutable();
 const { Terminal } = nodeRequire("@xterm/headless") as {
   Terminal: HeadlessTerminalConstructor;
 };
@@ -232,12 +235,9 @@ export class PaneTerminal {
 
     this.ptyProcess.onExit(({ exitCode }) => {
       this.exitCode = exitCode;
+      PaneTerminal.closing.delete(this);
       if (!this.closed) options.onExit?.(exitCode);
     });
-
-    if (this.command && process.platform === "win32") {
-      queueMicrotask(() => this.write(`${this.command}\r`));
-    }
   }
 
   get modes(): PaneModes {
@@ -806,13 +806,43 @@ export class PaneTerminal {
     return this.detector.reportHook(state, source, Date.now(), suppressed);
   }
 
+  /** Panes closed whose process has not exited yet. */
+  private static readonly closing = new Set<PaneTerminal>();
+
+  /** Wait (bounded) for closed panes' processes to exit. Windows cannot
+   * delete a directory while a process has it as its working directory. */
+  static async closedPanesExited(timeoutMs = 3_000): Promise<void> {
+    const deadline = Date.now() + timeoutMs;
+    while (PaneTerminal.closing.size > 0 && Date.now() < deadline) {
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    }
+  }
+
   close(): void {
     if (this.closed) return;
     this.closed = true;
+    if (this.exitCode === null) PaneTerminal.closing.add(this);
+    const pid = this.ptyProcess.pid;
+    if (process.platform === "win32" && pid && this.exitCode === null) {
+      // node-pty finds the console's processes through a helper that can
+      // fail (AttachConsole), leaving children such as Git Bash's real
+      // bash.exe and its jobs running on a dead console. End the whole tree
+      // while the shell is still its root, before the console closes.
+      try {
+        execFileSync("taskkill", ["/pid", String(pid), "/T", "/F"], {
+          stdio: "ignore",
+          timeout: 2_000,
+          windowsHide: true,
+        });
+      } catch {
+        // The shell may already have exited.
+      }
+    }
     try {
       this.ptyProcess.kill();
     } catch {
       // A PTY can disappear while a close request is already in flight.
+      PaneTerminal.closing.delete(this);
     }
   }
 
@@ -825,13 +855,29 @@ export function detectAgent(command: string): string | null {
   return detectAgentFromCommand(command);
 }
 
-function paneShell(
+export function paneShell(
   command: string | null,
   configured?: { file: string; args: string[] },
-): { file: string; args: string[] } {
+  platform: NodeJS.Platform = process.platform,
+): { file: string; args: string[] | string } {
   const shell = configured ?? defaultShell();
-  if (!command || process.platform === "win32") return shell;
+  if (!command) return shell;
+  if (platform === "win32") {
+    const name = windowsShellName(shell.file);
+    // cmd.exe does not understand backslash-escaped quotes, so the command
+    // line is passed to node-pty verbatim: `/s /c "..."` strips the outer
+    // quotes and runs the rest as typed.
+    if (name === "cmd") return { file: shell.file, args: [...shell.args, "/d", "/s", "/c", `"${command}"`].join(" ") };
+    if (name === "powershell" || name === "pwsh") {
+      return { file: shell.file, args: [...shell.args, "-Command", command] };
+    }
+  }
   return { file: shell.file, args: [...shell.args, "-c", command] };
+}
+
+/** Lowercase executable name of a Windows shell path, without `.exe`. */
+function windowsShellName(file: string): string {
+  return path.win32.basename(file).toLowerCase().replace(/\.exe$/, "");
 }
 
 export function paneEnvironment(
@@ -859,11 +905,19 @@ export function paneEnvironment(
 
 const SHEPHERD_VERSION = "0.1.0";
 
-export function cwdFromOsc7(data: string): string | null {
+export function cwdFromOsc7(
+  data: string,
+  platform: NodeJS.Platform = process.platform,
+): string | null {
   try {
     const url = new URL(data);
     if (url.protocol !== "file:") return null;
     const pathname = decodeURIComponent(url.pathname);
+    // file:///C:/Users/me arrives as /C:/Users/me; drop the leading slash
+    // and use the native separator so it matches paths Node reports.
+    if (platform === "win32" && /^\/[A-Za-z]:(\/|$)/.test(pathname)) {
+      return path.win32.normalize(`${pathname.slice(1)}${pathname.length === 3 ? "/" : ""}`);
+    }
     return pathname.length > 0 ? pathname : null;
   } catch {
     return null;
@@ -914,14 +968,23 @@ function sanitizeTitle(title: string): string {
 }
 
 /** Shell per Shepherd's [terminal] settings: `default_shell` or $SHELL, and
- * a login shell on macOS in "auto" mode. */
+ * a login shell on macOS in "auto" mode. On Windows only an explicit
+ * `default_shell` naming a Windows executable is used ($SHELL from Git Bash
+ * or MSYS is a POSIX path, as is a setting shared with Unix machines), and
+ * only "login" mode asks a POSIX shell for a login shell. */
 export function configuredShell(
   defaultShellSetting: string,
   mode: "auto" | "login" | "non_login",
   env: NodeJS.ProcessEnv = process.env,
   platform: NodeJS.Platform = process.platform,
 ): { file: string; args: string[] } {
-  if (platform === "win32") return defaultShell();
+  if (platform === "win32") {
+    if (!defaultShellSetting || defaultShellSetting.startsWith("/")) return defaultShell();
+    const name = windowsShellName(defaultShellSetting);
+    if (name === "cmd") return { file: defaultShellSetting, args: [] };
+    if (name === "powershell" || name === "pwsh") return { file: defaultShellSetting, args: ["-NoLogo"] };
+    return { file: defaultShellSetting, args: mode === "login" ? ["-l"] : [] };
+  }
   const file = defaultShellSetting || env.SHELL || "/bin/sh";
   const login = mode === "login" || (mode === "auto" && platform === "darwin");
   return { file, args: login ? ["-l"] : [] };

@@ -69,16 +69,20 @@ describe("ssh config generation", () => {
     expect(defaultSshIncludes(home, () => false)).toEqual([]);
     fs.mkdirSync(path.join(home, ".ssh"));
     fs.writeFileSync(path.join(home, ".ssh", "config"), "Host x\n");
-    expect(defaultSshIncludes(home, fs.existsSync)[0]).toBe(path.join(home, ".ssh", "config"));
+    // Include paths use forward slashes, which OpenSSH accepts on Windows too.
+    expect(defaultSshIncludes(home, fs.existsSync)[0])
+      .toBe(path.join(home, ".ssh", "config").replaceAll("\\", "/"));
   });
 
   it("writes the config content-addressed and private", () => {
     const directory = ensurePrivateDirectory(path.join(temporaryDirectory(), "run"));
-    expect(fs.statSync(directory).mode & 0o777).toBe(0o700);
+    // Windows has no Unix permission bits to check.
+    const checkModes = process.platform !== "win32";
+    if (checkModes) expect(fs.statSync(directory).mode & 0o777).toBe(0o700);
     const first = writeSshConfig(directory, "Host *\n");
     expect(writeSshConfig(directory, "Host *\n")).toBe(first);
     expect(fs.readFileSync(first, "utf8")).toBe("Host *\n");
-    expect(fs.statSync(first).mode & 0o777).toBe(0o600);
+    if (checkModes) expect(fs.statSync(first).mode & 0o777).toBe(0o600);
     expect(writeSshConfig(directory, "Host other\n")).not.toBe(first);
   });
 

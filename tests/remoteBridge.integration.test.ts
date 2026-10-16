@@ -1,10 +1,10 @@
 import { spawn } from "node:child_process";
-import fs from "node:fs";
 import path from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { ClientConnection } from "../src/client/connection.js";
 import { openChildBridge } from "../src/remote/bridge.js";
 import { ShepherdDaemon } from "../src/server/daemon.js";
+import { connect } from "../src/transport.js";
 import type { EventFrame, StateView } from "../src/types.js";
 import { createRemoteFixture, waitFor, type RemoteFixture } from "./remoteFixture.js";
 
@@ -108,7 +108,9 @@ describe("shepherd server bridge over child stdio", () => {
     try {
       const state = await connection.request({ type: "state.get" }) as StateView;
       expect(state.serverPid).not.toBe(process.pid);
-      expect(fs.existsSync(socket)).toBe(true);
+      // The new daemon listens at that address (a named pipe on Windows,
+      // so probe it by connecting rather than checking for a file).
+      (await connect(socket)).destroy();
       await connection.request({ type: "server.stop" });
     } finally {
       connection.close();

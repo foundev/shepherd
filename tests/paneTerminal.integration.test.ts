@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { pathToFileURL } from "node:url";
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 import {
   PaneTerminal,
@@ -10,11 +11,12 @@ import {
 } from "../src/server/terminal.js";
 import { SurfaceSubscription } from "../src/server/surfaces.js";
 import { isShellLike } from "../src/client/surfaces.js";
+import { missingPosixShell, paneTestTimeout, paneWaitMs, testPaneShell } from "./shellFixture.js";
 
 const panes: PaneTerminal[] = [];
 const originalShell = process.env.SHELL;
 
-// The scripted apps below use bash's `read` options.
+// The scripted apps below use bash's `read` options (Git Bash on Windows).
 beforeAll(() => {
   process.env.SHELL = "/bin/bash";
 });
@@ -30,6 +32,7 @@ function pane(command: string, onExit?: (code: number) => void): PaneTerminal {
     cwd: os.tmpdir(),
     command,
     onExit,
+    shell: testPaneShell,
   });
   panes.push(created);
   return created;
@@ -42,7 +45,7 @@ function screen(target: PaneTerminal): string {
 }
 
 async function until(check: () => boolean): Promise<void> {
-  for (let attempt = 0; attempt < 80; attempt += 1) {
+  for (let attempt = 0; attempt < paneWaitMs / 50; attempt += 1) {
     if (check()) return;
     await new Promise((resolve) => setTimeout(resolve, 50));
   }
@@ -63,14 +66,16 @@ afterEach(() => {
   for (const entry of panes.splice(0)) entry.close();
 });
 
-describe("pane terminal", () => {
-  it.each(["history", "handoff"])("keeps backgrounds and inverse spaces through snapshots and %s replay", async (source) => {
+describe.skipIf(missingPosixShell)("pane terminal", { timeout: paneTestTimeout }, () => {
+  // Live handoff passes PTY master fds to a new daemon; Windows has none.
+  it.each(process.platform === "win32" ? ["history"] : ["history", "handoff"])("keeps backgrounds and inverse spaces through snapshots and %s replay", async (source) => {
     const target = pane(
       "printf 'label\\033[44m\\033[K\\033[0m\\r\\n" +
       "\\033[42m    \\033[0m\\r\\n" +
       "\\033[7m    \\033[0m'; sleep 5",
     );
-    await screenContaining(target, "label");
+    // ConPTY can paint the rows in separate frames.
+    await until(() => target.snapshot(3)[2]?.some((span) => span.inverse) ?? false);
     const lines = target.snapshot(3);
     expect(lines[0]).toContainEqual(expect.objectContaining({
       text: " ".repeat(target.cols - 5), backgroundColor: "blue",
@@ -81,7 +86,7 @@ describe("pane terminal", () => {
     expect(replay).toBeTruthy();
     const restored = new PaneTerminal({
       id: "restored-backgrounds", title: "restored", cwd: os.tmpdir(),
-      command: "sleep 5", replay: replay!,
+      command: "sleep 5", replay: replay!, shell: testPaneShell,
     });
     panes.push(restored);
     await screenContaining(restored, "label");
@@ -102,7 +107,9 @@ describe("pane terminal", () => {
       `printf '${palette}\\033[0;1;32muser\\033[0m:` +
       "\\033[1;34mdir\\033[0m " +
       "\\033[38;2;0;0;128;48;2;16;23;34mrgb\\033[0m " +
-      "\\033[38;5;24mindexed\\033[0m done'; sleep 5",
+      // Not a space after the reset: ConPTY repaints a space with the
+      // previous foreground, which looks the same.
+      "\\033[38;5;24mindexed\\033[0m:done'; sleep 5",
     );
     await screenContaining(target, "done");
     const lines = target.snapshot(30, "recent").filter((line) => line.length > 0);
@@ -117,12 +124,12 @@ describe("pane terminal", () => {
       expect.objectContaining({ text: "dir", color: "blue", bold: true }),
       expect.objectContaining({ text: "rgb", color: "#000080", backgroundColor: "#101722" }),
       expect.objectContaining({ text: "indexed", color: "#005f87" }),
-      expect.objectContaining({ text: expect.stringMatching(/^ done\s*$/), color: undefined }),
+      expect.objectContaining({ text: expect.stringMatching(/^:done\s*$/), color: undefined }),
     ]));
 
     const restored = new PaneTerminal({
       id: "restored-colors", title: "restored", cwd: os.tmpdir(),
-      command: "sleep 5", replay: target.historyAnsi()!,
+      command: "sleep 5", replay: target.historyAnsi()!, shell: testPaneShell,
     });
     panes.push(restored);
     await screenContaining(restored, "done");
@@ -195,6 +202,7 @@ describe("pane terminal", () => {
       cwd: os.tmpdir(),
       command: "printf '\\033]52;c;aGVsbG8=\\007'; sleep 5",
       onClipboard: (text) => copied.push(text),
+      shell: testPaneShell,
     });
     panes.push(target);
     await until(() => copied.length > 0);
@@ -209,6 +217,7 @@ describe("pane terminal", () => {
       command: "printf 'see \\033]8;;https://example.com/docs\\033\\\\here\\033]8;;\\033\\\\ and https://shepherd.dev/a/very/long/path/that/wraps/over/the/edge/of/the/pane.\\n'; sleep 5",
       initialCols: 40,
       initialRows: 10,
+      shell: testPaneShell,
     });
     panes.push(target);
     await until(() => screen(target).includes("pane."));
@@ -225,7 +234,8 @@ describe("pane terminal", () => {
       fs.mkdtempSync(path.join(os.tmpdir(), "osc7-")),
     );
     const target = pane(
-      `printf '\\033]7;file://host${directory}\\007'; sleep 5`,
+      // An argument, not the format: file URLs can hold %-escapes.
+      `printf '\\033]7;%s\\007' '${pathToFileURL(directory).href.replace("file://", "file://host")}'; sleep 5`,
     );
     await until(() => target.currentCwd === directory);
     fs.rmSync(directory, { recursive: true, force: true });

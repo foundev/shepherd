@@ -12,6 +12,7 @@ import {
   openChildBridge,
   runBridgeServer,
 } from "../src/remote/bridge.js";
+import { ipcPath } from "../src/transport.js";
 import type { EventFrame } from "../src/types.js";
 
 const cleanups: Array<() => void> = [];
@@ -103,7 +104,8 @@ describe("bridge client stream", () => {
 describe("bridge server", () => {
   async function echoServer() {
     const directory = fs.mkdtempSync(path.join(os.tmpdir(), "shepherd-bridge-"));
-    const socketPath = path.join(directory, "d.sock");
+    // A named pipe on Windows, where a file path cannot be listened on.
+    const socketPath = ipcPath(path.join(directory, "d.sock"));
     const server = net.createServer((socket) => {
       socket.on("data", (chunk) => socket.write(chunk.toString("utf8").toUpperCase()));
     });

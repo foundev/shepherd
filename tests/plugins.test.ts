@@ -241,7 +241,7 @@ describe("plugin manifest v2 fields", () => {
     expect(JSON.parse(env.SHEPHERD_PLUGIN_CONTEXT_JSON ?? "")).toMatchObject({ workspace_id: "w1" });
     expect("SHEPHERD_PLUGIN_CLICKED_URL" in env).toBe(false);
     expect(pluginConfigDirectory("example.full", { SHEPHERD_CONFIG_HOME: "/home/x/cfg" }))
-      .toBe(path.join("/home/x/cfg", "plugins", "example.full"));
+      .toBe(path.resolve("/home/x/cfg", "plugins", "example.full"));
     expect(pluginConfigDirectory("a.b", { XDG_CONFIG_HOME: "/xdg" }))
       .toBe(path.join("/xdg", "shepherd", "plugins", "a.b"));
     expect(() => pluginConfigDirectory("../escape")).toThrow("invalid plugin id");

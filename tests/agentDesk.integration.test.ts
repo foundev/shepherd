@@ -6,8 +6,9 @@ import { ShepherdDaemon } from "../src/server/daemon.js";
 import { ClientConnection } from "../src/client/connection.js";
 import { connect } from "../src/transport.js";
 import type { AgentTask, StateView } from "../src/types.js";
+import { defaultShellToml, missingPosixShell, paneTestTimeout, paneWaitMs } from "./shellFixture.js";
 
-describe("agent task lifecycle", () => {
+describe.skipIf(missingPosixShell)("agent task lifecycle", { timeout: paneTestTimeout }, () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "shepherd-desk-"));
   const socketPath = path.join(root, "d.sock");
   const env = { ...process.env };
@@ -15,7 +16,7 @@ describe("agent task lifecycle", () => {
   beforeAll(async () => {
     process.env.SHEPHERD_STATE_HOME = root;
     process.env.SHEPHERD_CONFIG_PATH = path.join(root, "config.toml");
-    fs.writeFileSync(process.env.SHEPHERD_CONFIG_PATH, '[terminal]\ndefault_shell="/bin/sh"\nshell_mode="non_login"\n[session]\nresume_agents_on_restore=false\n');
+    fs.writeFileSync(process.env.SHEPHERD_CONFIG_PATH, `[terminal]\ndefault_shell=${defaultShellToml("/bin/sh")}\nshell_mode="non_login"\n[session]\nresume_agents_on_restore=false\n`);
     daemon = new ShepherdDaemon({ session: "desk", socketPath });
     await daemon.start();
     connection = ClientConnection.open(await connect(socketPath));
@@ -55,8 +56,11 @@ describe("agent task lifecycle", () => {
     const state = await connection.request({ type: "pane.create", command: "printf 'review this result'; sleep 0.3; exit 1", focus: false }) as StateView;
     const finishedId = state.panes.at(-1)!.id;
     await connection.request({ type: "task.update", paneId: finishedId, patch: { title: "Inspect result", summary: "Investigate failure" } });
-    await new Promise(resolve => setTimeout(resolve, 600));
-    const after = await connection.request({ type: "state.get" }) as StateView;
+    let after = await connection.request({ type: "state.get" }) as StateView;
+    for (const deadline = Date.now() + paneWaitMs; after.panes.find(p => p.id === finishedId)?.task?.review !== "requested" && Date.now() < deadline;) {
+      await new Promise(resolve => setTimeout(resolve, 50));
+      after = await connection.request({ type: "state.get" }) as StateView;
+    }
     expect(after.panes.find(p => p.id === finishedId)).toMatchObject({ exitCode: 1, task: { review: "requested", blocker: expect.stringContaining("code 1") } });
     const snapshot = await connection.request({ type: "pane.snapshot", paneId: finishedId, rows: 10 });
     expect(JSON.stringify(snapshot)).toContain("review this result");

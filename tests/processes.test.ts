@@ -36,7 +36,9 @@ describe("process table", () => {
   });
 });
 
-describe("foreground agent detection", () => {
+// processTable() has no Windows implementation (no ps; Windows has no
+// terminal process groups), so foreground agents are not detected there.
+describe.skipIf(process.platform === "win32")("foreground agent detection", () => {
   let root: string;
   let daemon: ShepherdDaemon;
   let connection: ClientConnection;
