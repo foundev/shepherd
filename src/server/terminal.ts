@@ -17,6 +17,7 @@ import { AgentDetector } from "./detection/detector.js";
 import { AdoptedPty } from "./adoptedPty.js";
 import { KittyKeyboardState } from "./kittyKeyboard.js";
 import { MetadataStore } from "./metadata.js";
+import { ensureSpawnHelperExecutable } from "./ptyHelper.js";
 import type { DetectionInput } from "./detection/engine.js";
 import type { DetectedState } from "./detection/manifest.js";
 
@@ -27,6 +28,7 @@ type HeadlessTerminal = InstanceType<HeadlessTerminalConstructor>;
 
 const nodeRequire = createRequire(import.meta.url);
 const execFileAsync = promisify(execFile);
+ensureSpawnHelperExecutable();
 const { Terminal } = nodeRequire("@xterm/headless") as {
   Terminal: HeadlessTerminalConstructor;
 };
