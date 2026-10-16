@@ -219,6 +219,21 @@ export async function removeWorktree(
   ]);
 }
 
+/** Throws the refusal `git worktree remove` would give a dirty checkout,
+ * so callers can check before doing anything they cannot undo. */
+export async function assertWorktreeRemovable(
+  checkout: string,
+  force: boolean,
+): Promise<void> {
+  if (force) return;
+  const changes = await gitOutput(checkout, ["status", "--porcelain"]);
+  if (changes.trim()) {
+    throw new Error(
+      `'${checkout}' contains modified or untracked files, use --force to delete it`,
+    );
+  }
+}
+
 function normalizeWorktree(value: Partial<GitWorktree>): GitWorktree {
   if (!value.path || !value.commit) {
     throw new Error("Git returned an incomplete worktree record");

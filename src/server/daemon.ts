@@ -84,6 +84,7 @@ import { evaluate, explain } from "./detection/engine.js";
 import { foregroundProcess, processTable, unwrapCommand } from "./processes.js";
 import { loadConfig } from "../config/model.js";
 import {
+  assertWorktreeRemovable,
   branchExists,
   branchSlug,
   canonicalPath,
@@ -753,8 +754,9 @@ export class ShepherdDaemon {
           if (process.platform === "win32") {
             // Windows cannot delete a directory that a running process (the
             // workspace's shells) has as its working directory, so close
-            // the panes first. Reopen the checkout if Git then refuses, as
-            // it does for a dirty worktree without force.
+            // the panes first. Refuse a dirty checkout before closing
+            // anything; reopen it if Git still refuses (e.g. it is locked).
+            await assertWorktreeRemovable(status.checkoutPath, message.force ?? false);
             this.closeWorkspace(workspace.id);
             await this.releaseClosedCheckouts();
             try {
