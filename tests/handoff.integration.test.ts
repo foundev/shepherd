@@ -7,7 +7,9 @@ import { ClientConnection } from "../src/client/connection.js";
 import { connect } from "../src/transport.js";
 import type { StateView } from "../src/types.js";
 
-describe("live handoff", () => {
+// Live handoff passes PTY master fds to a new daemon process, which has no
+// Windows equivalent; the daemon refuses it there with platform_unsupported.
+describe.skipIf(process.platform === "win32")("live handoff", () => {
   const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "shepherd-handoff-")));
   const socketPath = path.join(root, "daemon.sock");
   const env = {

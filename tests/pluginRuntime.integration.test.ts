@@ -72,7 +72,7 @@ describe("plugin runtime: hooks, logs, panes, link handlers", () => {
       'name = "Runtime"',
       'version = "0.1.0"',
       'min_shepherd_version = "0.1.0"',
-      'platforms = ["linux", "macos"]',
+      'platforms = ["linux", "macos", "windows"]',
       "",
       "[[startup]]",
       'command = ["node", "record.js", "startup"]',
@@ -135,7 +135,7 @@ describe("plugin runtime: hooks, logs, panes, link handlers", () => {
     expect(linked).toMatchObject({
       id: "example.runtime",
       minShepherdVersion: "0.1.0",
-      platforms: ["linux", "macos"],
+      platforms: ["linux", "macos", "windows"],
       managed: false,
       actions: [{ id: "record", contexts: ["workspace", "pane"] }],
       events: [{ on: ["tab.created", "pane.bell", "pane.exited"] }],

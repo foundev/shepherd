@@ -62,7 +62,8 @@ describe("Shepherd CLI daemon startup", () => {
     ]);
 
     expect(exitCode).toBe(0);
-    expect(output).toContain(socketPath);
+    // The path is reported inside JSON, where Windows backslashes are escaped.
+    expect(output).toContain(JSON.stringify(socketPath));
   });
 
   it("reports invalid plugin sources without a stack trace", async () => {

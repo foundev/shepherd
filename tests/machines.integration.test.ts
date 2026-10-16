@@ -14,7 +14,11 @@ import { connect } from "../src/transport.js";
 import type { RemoteMachineView, StateView } from "../src/types.js";
 import { createRemoteFixture, waitFor, type RemoteFixture } from "./remoteFixture.js";
 
-describe("saved machines over a persistent ssh bridge", () => {
+// The fixture's fake `ssh` is a shell script standing in for a POSIX remote
+// host. Windows cannot spawn a script as `ssh` (the real ssh.exe on PATH
+// wins), and these assertions expect ControlMaster sharing, which Shepherd
+// does not use on Windows.
+describe.skipIf(process.platform === "win32")("saved machines over a persistent ssh bridge", () => {
   let fixture: RemoteFixture;
   let socketPath: string;
   let configRoot: string;
