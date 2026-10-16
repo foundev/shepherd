@@ -6,6 +6,7 @@ import { ClientConnection } from "../src/client/connection.js";
 import { ShepherdDaemon } from "../src/server/daemon.js";
 import { connect } from "../src/transport.js";
 import type { EventFrame } from "../src/types.js";
+import { missingPosixShell, windowsShellConfig } from "./shellFixture.js";
 
 describe("Shepherd runtime events", () => {
   let stateRoot: string;
@@ -16,11 +17,17 @@ describe("Shepherd runtime events", () => {
   let received!: Promise<EventFrame>;
   let agentEvents: EventFrame[] = [];
   let resolveAgentEvent!: (frame: EventFrame) => void;
+  const savedConfig = process.env.SHEPHERD_CONFIG_PATH;
 
   beforeAll(async () => {
     stateRoot = fs.mkdtempSync(path.join(os.tmpdir(), "shepherd-events-"));
     socketPath = path.join(stateRoot, "daemon.sock");
     process.env.SHEPHERD_STATE_HOME = stateRoot;
+    // The agent pane's command is POSIX shell (Git Bash on Windows).
+    if (windowsShellConfig()) {
+      process.env.SHEPHERD_CONFIG_PATH = path.join(stateRoot, "config.toml");
+      fs.writeFileSync(process.env.SHEPHERD_CONFIG_PATH, windowsShellConfig());
+    }
     daemon = new ShepherdDaemon({ session: "events", socketPath });
     await daemon.start();
     received = new Promise((resolve) => {
@@ -38,6 +45,8 @@ describe("Shepherd runtime events", () => {
   afterAll(async () => {
     subscriber.close();
     await daemon.stop();
+    if (savedConfig === undefined) delete process.env.SHEPHERD_CONFIG_PATH;
+    else process.env.SHEPHERD_CONFIG_PATH = savedConfig;
     fs.rmSync(stateRoot, { recursive: true, force: true });
   });
 
@@ -75,7 +84,7 @@ describe("Shepherd runtime events", () => {
     }
   });
 
-  it("emits agent lifecycle transitions", { timeout: 15_000 }, async () => {
+  it.skipIf(missingPosixShell)("emits agent lifecycle transitions", { timeout: 15_000 }, async () => {
     agentEvents = [];
     const blocked = new Promise<EventFrame>((resolve) => {
       resolveAgentEvent = resolve;

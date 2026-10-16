@@ -12,6 +12,10 @@ import { shellCommand } from "../src/server/agentSessions.js";
 import { processTable } from "../src/server/processes.js";
 import { connect } from "../src/transport.js";
 import type { StateView } from "../src/types.js";
+import { defaultShellToml, missingPosixShell, paneTestTimeout, paneWaitMs, windowsBash } from "./shellFixture.js";
+
+/** Waits for pane processes: Git Bash and node start slowly on Windows. */
+const windowsWait = (unixMs: number) => process.platform === "win32" ? paneWaitMs : unixMs;
 
 let root: string;
 let settingsFile: string;
@@ -38,7 +42,16 @@ afterEach(async () => {
   connection = undefined;
   daemon = undefined;
   vi.unstubAllEnvs();
-  fs.rmSync(root, { recursive: true, force: true });
+  // On Windows a process an MSYS shell started can outlive its closed pane
+  // (its Windows parent is gone, so the pane's process tree misses it), and
+  // a directory cannot be removed while it is a live process's cwd.
+  const pids = path.join(root, "muse.pids");
+  if (process.platform === "win32" && fs.existsSync(pids)) {
+    for (const pid of fs.readFileSync(pids, "utf8").split("\n").filter(Boolean)) {
+      try { process.kill(Number(pid)); } catch { /* already exited */ }
+    }
+  }
+  fs.rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
 });
 
 function writeJson(file: string, value: unknown) {
@@ -60,6 +73,11 @@ function run(file: string, args: string[], env: NodeJS.ProcessEnv, input = "") {
     child.on("close", code => { clearTimeout(timer); resolve({ code, stdout, stderr }); });
     child.stdin.end(input);
   });
+}
+
+function writeShellConfig() {
+  fs.mkdirSync(path.dirname(process.env.SHEPHERD_CONFIG_PATH!), { recursive: true });
+  fs.writeFileSync(process.env.SHEPHERD_CONFIG_PATH!, `[terminal]\ndefault_shell = ${defaultShellToml("/bin/sh")}\nshell_mode = "non_login"\n`);
 }
 
 async function startDaemon() {
@@ -153,8 +171,10 @@ describe("Muse managed hook installation", () => {
 });
 
 describe("Muse lifecycle reporting", () => {
-  it("reports tasks, activity, approvals, questions, failures and review from documented payloads", async () => {
+  it.skipIf(missingPosixShell)("reports tasks, activity, approvals, questions, failures and review from documented payloads", { timeout: paneTestTimeout }, async () => {
     installIntegration("muse");
+    // The pane's `sleep 60` is POSIX shell (Git Bash on Windows).
+    if (windowsBash) writeShellConfig();
     await startDaemon();
     const initial = await connection!.request({ type: "pane.create", command: "sleep 60", focus: false }) as StateView;
     const paneId = initial.panes.at(-1)!.id;
@@ -274,24 +294,31 @@ describe("Muse lifecycle reporting", () => {
     await vi.waitFor(async () => expect(["idle", "done"]).toContain((await pane())?.status), { timeout: 3000 });
   }, 20_000);
 
-  it("restores command-backed Muse panes by launching resume in a fresh shell", async () => {
+  it.skipIf(missingPosixShell)("restores command-backed Muse panes by launching resume in a fresh shell", { timeout: paneTestTimeout }, async () => {
     const bin = path.join(root, "bin");
     const log = path.join(root, "launches.jsonl");
     fs.mkdirSync(bin);
-    fs.writeFileSync(path.join(bin, "muse"), `#!${process.execPath}\nconst fs = require("node:fs");\nfs.appendFileSync(${JSON.stringify(log)}, JSON.stringify(process.argv.slice(2)) + "\\n");\nprocess.stdin.resume();\n`, { mode: 0o755 });
+    const script = `const fs = require("node:fs");\nfs.appendFileSync(${JSON.stringify(log)}, JSON.stringify(process.argv.slice(2)) + "\\n");\nprocess.stdin.resume();\n`;
+    if (process.platform === "win32") {
+      // Git Bash cannot run a shebang naming a Windows path with spaces.
+      // Each launch records its pid for afterEach to end.
+      fs.writeFileSync(path.join(bin, "muse.cjs"), `require("node:fs").appendFileSync(${JSON.stringify(path.join(root, "muse.pids"))}, process.pid + "\\n");\n${script}`);
+      fs.writeFileSync(path.join(bin, "muse"), `#!/bin/sh\nexec ${JSON.stringify(process.execPath.replaceAll("\\", "/"))} ${JSON.stringify(path.join(bin, "muse.cjs").replaceAll("\\", "/"))} "$@"\n`);
+    } else {
+      fs.writeFileSync(path.join(bin, "muse"), `#!${process.execPath}\n${script}`, { mode: 0o755 });
+    }
     vi.stubEnv("PATH", `${bin}${path.delimiter}${process.env.PATH}`);
-    fs.mkdirSync(path.dirname(process.env.SHEPHERD_CONFIG_PATH!), { recursive: true });
-    fs.writeFileSync(process.env.SHEPHERD_CONFIG_PATH!, '[terminal]\ndefault_shell = "/bin/sh"\nshell_mode = "non_login"\n');
+    writeShellConfig();
     await startDaemon();
     const state = await connection!.request({ type: "pane.create", command: "muse", cwd: root, focus: false }) as StateView;
     const paneId = state.panes.at(-1)!.id;
-    await vi.waitFor(() => expect(fs.existsSync(log)).toBe(true));
+    await vi.waitFor(() => expect(fs.existsSync(log)).toBe(true), { timeout: windowsWait(1000) });
     await connection!.request({ type: "pane.report_agent_session", paneId, source: "shepherd:muse", agent: "muse", sessionId: "saved-session" });
     connection!.close();
     await daemon!.stop();
     await startDaemon();
     await vi.waitFor(() => expect(fs.readFileSync(log, "utf8").trim().split("\n").map(line => JSON.parse(line)))
-      .toEqual([[], ["resume", "saved-session"]]), { timeout: 3000 });
+      .toEqual([[], ["resume", "saved-session"]]), { timeout: windowsWait(3000) });
     const restored = await connection!.request({ type: "state.get" }) as StateView;
     expect(restored.panes.some(pane => pane.continuity === "resuming" && pane.command === null)).toBe(true);
   });

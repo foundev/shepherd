@@ -7,8 +7,10 @@ import { ShepherdDaemon } from "../src/server/daemon.js";
 import { historyPath } from "../src/server/persistence.js";
 import { connect } from "../src/transport.js";
 import type { StateView } from "../src/types.js";
+import { missingPosixShell, paneWaitMs, windowsShellConfig } from "./shellFixture.js";
 
-describe("pane screen history", () => {
+// The pane runs `echo $((...))`, so Windows uses Git Bash.
+describe.skipIf(missingPosixShell)("pane screen history", () => {
   let root: string;
   let daemon: ShepherdDaemon;
   let connection: ClientConnection;
@@ -33,7 +35,7 @@ describe("pane screen history", () => {
     root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "shepherd-history-")));
     process.env.SHEPHERD_CONFIG_PATH = path.join(root, "config.toml");
     process.env.SHEPHERD_STATE_HOME = root;
-    fs.writeFileSync(process.env.SHEPHERD_CONFIG_PATH, "[experimental]\npane_history = true\n");
+    fs.writeFileSync(process.env.SHEPHERD_CONFIG_PATH, `${windowsShellConfig()}[experimental]\npane_history = true\n`);
     await start();
   });
 
@@ -54,14 +56,15 @@ describe("pane screen history", () => {
     const state = await connection.request({ type: "state.get" }) as StateView;
     const paneId = state.focusedPaneId;
     await connection.request({ type: "pane.input", paneId, data: "echo history-$((6*7))\r" });
-    for (let attempt = 0; attempt < 50 && !(await screenText(paneId)).includes("history-42"); attempt += 1) {
+    for (let attempt = 0; attempt < Math.max(50, paneWaitMs / 100) && !(await screenText(paneId)).includes("history-42"); attempt += 1) {
       await new Promise((resolve) => setTimeout(resolve, 100));
     }
 
     connection.close();
     await daemon.stop();
     const file = historyPath("history");
-    expect(fs.statSync(file).mode & 0o777).toBe(0o600);
+    // Windows has no Unix permission bits to check.
+    if (process.platform !== "win32") expect(fs.statSync(file).mode & 0o777).toBe(0o600);
     expect(fs.readFileSync(file, "utf8")).toContain("history-42");
 
     await start();
@@ -77,5 +80,5 @@ describe("pane screen history", () => {
       await new Promise((resolve) => setTimeout(resolve, 100));
     }
     expect(fs.existsSync(file)).toBe(false);
-  }, 20_000);
+  }, process.platform === "win32" ? 60_000 : 20_000);
 });
