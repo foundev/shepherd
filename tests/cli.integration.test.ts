@@ -56,15 +56,17 @@ describe("Shepherd CLI daemon startup", () => {
       new Promise<number | null>((resolve) => {
         child.once("exit", resolve);
       }),
+      // Two tsx cold starts plus the daemon's first pane take over 2s on
+      // Windows; a CLI that held the socket would never exit at all.
       new Promise<never>((_, reject) => {
-        setTimeout(() => reject(new Error("server start did not return")), 4_000);
+        setTimeout(() => reject(new Error("server start did not return")), 12_000);
       }),
     ]);
 
     expect(exitCode).toBe(0);
     // The path is reported inside JSON, where Windows backslashes are escaped.
     expect(output).toContain(JSON.stringify(socketPath));
-  });
+  }, 15_000);
 
   it("reports invalid plugin sources without a stack trace", async () => {
     const child = spawn(

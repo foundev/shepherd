@@ -47,11 +47,16 @@ afterEach(async () => {
   // a directory cannot be removed while it is a live process's cwd.
   const pids = path.join(root, "muse.pids");
   if (process.platform === "win32" && fs.existsSync(pids)) {
-    for (const pid of fs.readFileSync(pids, "utf8").split("\n").filter(Boolean)) {
-      try { process.kill(Number(pid)); } catch { /* already exited */ }
+    const live = fs.readFileSync(pids, "utf8").split("\n").filter(Boolean).map(Number);
+    for (const pid of live) {
+      try { process.kill(pid); } catch { /* already exited */ }
     }
+    // Termination is asynchronous; the directory stays busy until they exit.
+    const alive = (pid: number) => { try { process.kill(pid, 0); return true; } catch { return false; } };
+    const deadline = Date.now() + 5_000;
+    while (live.some(alive) && Date.now() < deadline) await new Promise((resolve) => setTimeout(resolve, 50));
   }
-  fs.rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+  fs.rmSync(root, { recursive: true, force: true, maxRetries: 20, retryDelay: 100 });
 });
 
 function writeJson(file: string, value: unknown) {
