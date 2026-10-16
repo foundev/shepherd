@@ -107,6 +107,7 @@ import {
   remotePaneRead,
 } from "./machineBridge.js";
 import { machinesPath } from "../machines.js";
+import { ipcPath, isFilesystemSocket } from "../transport.js";
 
 interface RunningTab {
   id: string;
@@ -289,9 +290,9 @@ export class ShepherdDaemon {
     return new Promise<void>((resolve, reject) => {
       const server = net.createServer((socket) => this.acceptClient(socket));
       server.on("error", reject);
-      server.listen(this.socketPath, () => {
+      server.listen(ipcPath(this.socketPath), () => {
         this.server = server;
-        if (process.platform !== "win32") {
+        if (isFilesystemSocket(this.socketPath)) {
           fs.chmodSync(this.socketPath, 0o600);
         }
         resolve();

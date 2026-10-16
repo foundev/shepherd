@@ -47,7 +47,15 @@ function agentHookScript(agent: "claude" | "muse"): string {
   return `#!/usr/bin/env node
 // ${MARKER} ${INTEGRATION_VERSION}: installed by shepherd; reinstalling overwrites this file.
 import net from "node:net";
+import { createHash } from "node:crypto";
+import path from "node:path";
 
+// Mirrors ipcPath() in shepherd's transport: on Windows a socket file path
+// maps to a named pipe.
+const PIPE = "\\\\\\\\.\\\\pipe\\\\";
+const ipcPath = (value) => process.platform !== "win32" || value.startsWith(PIPE)
+  ? value
+  : PIPE + "shepherd-" + createHash("sha256").update(path.win32.resolve(value).toLowerCase()).digest("hex").slice(0, 32);
 const socketPath = process.env.SHEPHERD_SOCKET_PATH;
 const paneId = process.env.SHEPHERD_PANE_ID;
 if (process.env.SHEPHERD_ENV !== "1" || !socketPath || !paneId) process.exit(0);
@@ -100,7 +108,7 @@ process.stdin.on("end", () => {
     task({ review: "requested" });
   }
   if (!requests.length) process.exit(0);
-  const socket = net.connect(socketPath);
+  const socket = net.connect(ipcPath(socketPath));
   const done = () => { socket.destroy(); process.exit(0); };
   socket.setTimeout(1500, done);
   socket.on("error", done);
