@@ -144,7 +144,7 @@ If your npm security policy blocks native package scripts, approve and rebuild
 the PTY dependency:
 
 ```bash
-npm install-scripts approve node-pty@1.0.0
+npm install-scripts approve node-pty@1.1.0
 npm rebuild node-pty
 ```
 
