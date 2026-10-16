@@ -41,7 +41,7 @@ export async function gitStatus(cwd: string): Promise<{
 } | null> {
   const top = await runGit(cwd, ["rev-parse", "--show-toplevel"]);
   if (top.exitCode !== 0) return null;
-  const root = top.stdout.trim();
+  const root = gitPath(top.stdout.trim());
   const dirs = await runGit(cwd, [
     "rev-parse",
     "--path-format=absolute",
@@ -85,7 +85,42 @@ export async function gitStatus(cwd: string): Promise<{
 
 function realpath(value: string): string {
   try {
-    return fs.realpathSync(value);
+    return realpathSync(value);
+  } catch {
+    return path.resolve(value);
+  }
+}
+
+/** Windows paths have several spellings: Git prints long names with forward
+ * slashes, while os.tmpdir() and user input may carry 8.3 short names
+ * (`RYANSV~1`) or another case. The native realpath expands them all to
+ * the one on-disk spelling, so paths from either side compare equal. */
+function realpathSync(value: string): string {
+  return process.platform === "win32"
+    ? fs.realpathSync.native(value)
+    : fs.realpathSync(value);
+}
+
+/** A resolved, symlink-free path; a missing final component (a checkout
+ * about to be created or already removed) resolves through its parent. */
+export function canonicalPath(value: string): string {
+  const resolved = path.resolve(value);
+  try {
+    return realpathSync(resolved);
+  } catch {
+    return path.join(
+      realpathSync(path.dirname(resolved)),
+      path.basename(resolved),
+    );
+  }
+}
+
+/** A path printed by Git in the platform's canonical spelling. Elsewhere
+ * Git's output is already the form callers compare against. */
+function gitPath(value: string): string {
+  if (process.platform !== "win32") return value;
+  try {
+    return canonicalPath(value);
   } catch {
     return path.resolve(value);
   }
@@ -112,7 +147,7 @@ export async function discoverRepository(inputPath: string): Promise<string> {
     "--show-toplevel",
   ])).trim();
   if (!root) throw new Error(`not a Git repository: ${resolved}`);
-  return root;
+  return gitPath(root);
 }
 
 export async function listWorktrees(root: string): Promise<GitWorktree[]> {
@@ -129,7 +164,7 @@ export async function listWorktrees(root: string): Promise<GitWorktree[]> {
     const value = rest.join(" ");
     if (key === "worktree") {
       if (current?.path) records.push(normalizeWorktree(current));
-      current = { path: value };
+      current = { path: gitPath(value) };
     } else if (key === "HEAD" && current) {
       current.commit = value;
     } else if (key === "branch" && current) {
@@ -171,7 +206,7 @@ export async function removeWorktree(
   target: string,
   force: boolean,
 ): Promise<void> {
-  const resolved = path.resolve(target);
+  const resolved = gitPath(path.resolve(target));
   const known = await listWorktrees(root);
   if (!known.some((worktree) => worktree.path === resolved)) {
     throw new Error(`unknown worktree: ${resolved}`);

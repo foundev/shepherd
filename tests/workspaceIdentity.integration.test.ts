@@ -7,8 +7,14 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ClientConnection } from "../src/client/connection.js";
 import { ShepherdDaemon } from "../src/server/daemon.js";
 import { saveState } from "../src/server/persistence.js";
+import { cwdFromOsc7 } from "../src/server/terminal.js";
 import { connect } from "../src/transport.js";
 import type { ShepherdRequest, StateView } from "../src/types.js";
+
+// Shells without OSC 7 are followed by reading the process's working
+// directory, which Windows does not expose for another process; there a
+// pane's directory changes only through OSC 7.
+const itFollowingCd = it.skipIf(process.platform === "win32");
 
 describe("workspace directory identity", () => {
   let directory: string;
@@ -21,7 +27,7 @@ describe("workspace directory identity", () => {
   let connection: ClientConnection;
 
   beforeEach(async () => {
-    directory = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "shepherd-spaces-")));
+    directory = fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), "shepherd-spaces-")));
     initialCwd = path.join(directory, "starting-folder");
     repository = path.join(directory, "project");
     nested = path.join(repository, "src");
@@ -49,7 +55,7 @@ describe("workspace directory identity", () => {
     connection?.close();
     await daemon?.stop();
     vi.unstubAllEnvs();
-    fs.rmSync(directory, { recursive: true, force: true });
+    fs.rmSync(directory, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   });
 
   async function start(): Promise<void> {
@@ -72,7 +78,7 @@ describe("workspace directory identity", () => {
     return (await request({ type: "state.get" })).workspaces.find((entry) => entry.id === id)!;
   }
 
-  it("follows cd without shell integration, including a newly created space and leaving Git", async () => {
+  itFollowingCd("follows cd without shell integration, including a newly created space and leaving Git", async () => {
     await cd("p1", nested);
     await expect.poll(async () => (await workspace()).label).toBe("project");
     expect(await workspace()).toMatchObject({ name: "", rootPath: nested, git: { branch: "main", checkoutPath: repository } });
@@ -85,7 +91,7 @@ describe("workspace directory identity", () => {
     expect(await workspace()).toMatchObject({ label: "project", rootPath: nested });
   });
 
-  it("preserves custom names and resumes automatic naming when cleared", async () => {
+  itFollowingCd("preserves custom names and resumes automatic naming when cleared", async () => {
     await request({ type: "workspace.rename", workspaceId: "w1", name: "research" });
     await cd("p1", nested);
     await expect.poll(async () => (await workspace()).git?.branch).toBe("main");
@@ -94,7 +100,7 @@ describe("workspace directory identity", () => {
     expect(await workspace()).toMatchObject({ name: "", label: "project" });
   });
 
-  it("keeps the root pane through focus, swaps, and restore, then adopts a surviving pane", async () => {
+  itFollowingCd("keeps the root pane through focus, swaps, and restore, then adopts a surviving pane", async () => {
     await cd("p1", nested);
     const split = await request({ type: "pane.create", direction: "right" });
     const otherPane = split.focusedPaneId;
@@ -112,7 +118,7 @@ describe("workspace directory identity", () => {
     expect(await workspace()).toMatchObject({ label: "other folder", rootPath: outside, git: null });
   });
 
-  it("uses the first tab independently of clients' selected tabs and replaces it when closed", async () => {
+  itFollowingCd("uses the first tab independently of clients' selected tabs and replaces it when closed", async () => {
     await cd("p1", nested);
     const second = ClientConnection.open(await connect(socketPath));
     try {
@@ -138,7 +144,7 @@ describe("workspace directory identity", () => {
     expect(created.panes.find((pane) => pane.id === created.focusedPaneId)?.cwd).toBe(outside);
   });
 
-  it("uses a linked checkout's name without making it a permanent custom name", async () => {
+  itFollowingCd("uses a linked checkout's name without making it a permanent custom name", async () => {
     const checkout = path.join(directory, "feature-checkout");
     execFileSync("git", ["-C", repository, "worktree", "add", "-b", "feature", checkout], { stdio: "ignore" });
     const opened = await request({ type: "worktree.open", path: checkout });
@@ -155,3 +161,12 @@ describe("workspace directory identity", () => {
     expect(await workspace(id)).toMatchObject({ name: "", label: "other folder", git: null });
   });
 }, 10_000);
+
+describe("OSC 7 directories", () => {
+  it("maps file URLs to native paths", () => {
+    expect(cwdFromOsc7("file://host/Users/me/some%20dir", "linux")).toBe("/Users/me/some dir");
+    expect(cwdFromOsc7("file:///C:/Users/me/some%20dir", "win32")).toBe("C:\\Users\\me\\some dir");
+    expect(cwdFromOsc7("file://host/C:/", "win32")).toBe("C:\\");
+    expect(cwdFromOsc7("file:///C:", "win32")).toBe("C:\\");
+  });
+});

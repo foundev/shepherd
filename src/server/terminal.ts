@@ -1,6 +1,7 @@
 import { execFile, execFileSync } from "node:child_process";
 import fs from "node:fs";
 import { createRequire } from "node:module";
+import path from "node:path";
 import { promisify } from "node:util";
 import pty from "node-pty";
 import { ANSI_COLORS } from "../ansiColors.js";
@@ -234,6 +235,7 @@ export class PaneTerminal {
 
     this.ptyProcess.onExit(({ exitCode }) => {
       this.exitCode = exitCode;
+      PaneTerminal.closing.delete(this);
       if (!this.closed) options.onExit?.(exitCode);
     });
 
@@ -808,13 +810,27 @@ export class PaneTerminal {
     return this.detector.reportHook(state, source, Date.now(), suppressed);
   }
 
+  /** Panes closed whose process has not exited yet. */
+  private static readonly closing = new Set<PaneTerminal>();
+
+  /** Wait (bounded) for closed panes' processes to exit. Windows cannot
+   * delete a directory while a process has it as its working directory. */
+  static async closedPanesExited(timeoutMs = 3_000): Promise<void> {
+    const deadline = Date.now() + timeoutMs;
+    while (PaneTerminal.closing.size > 0 && Date.now() < deadline) {
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    }
+  }
+
   close(): void {
     if (this.closed) return;
     this.closed = true;
+    if (this.exitCode === null) PaneTerminal.closing.add(this);
     try {
       this.ptyProcess.kill();
     } catch {
       // A PTY can disappear while a close request is already in flight.
+      PaneTerminal.closing.delete(this);
     }
   }
 
@@ -861,11 +877,19 @@ export function paneEnvironment(
 
 const SHEPHERD_VERSION = "0.1.0";
 
-export function cwdFromOsc7(data: string): string | null {
+export function cwdFromOsc7(
+  data: string,
+  platform: NodeJS.Platform = process.platform,
+): string | null {
   try {
     const url = new URL(data);
     if (url.protocol !== "file:") return null;
     const pathname = decodeURIComponent(url.pathname);
+    // file:///C:/Users/me arrives as /C:/Users/me; drop the leading slash
+    // and use the native separator so it matches paths Node reports.
+    if (platform === "win32" && /^\/[A-Za-z]:(\/|$)/.test(pathname)) {
+      return path.win32.normalize(`${pathname.slice(1)}${pathname.length === 3 ? "/" : ""}`);
+    }
     return pathname.length > 0 ? pathname : null;
   } catch {
     return null;

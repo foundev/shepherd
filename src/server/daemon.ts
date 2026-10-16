@@ -86,6 +86,7 @@ import { loadConfig } from "../config/model.js";
 import {
   branchExists,
   branchSlug,
+  canonicalPath,
   createWorktree,
   discoverRepository,
   gitStatus,
@@ -326,6 +327,10 @@ export class ShepherdDaemon {
       // daemon alive forever.
       for (const client of this.clients) client.socket.destroy();
     });
+
+    // Shells hold their working directories open on Windows; once stop()
+    // resolves, callers may delete them.
+    if (process.platform === "win32") await PaneTerminal.closedPanesExited();
 
     if (process.platform !== "win32") {
       try {
@@ -745,6 +750,21 @@ export class ShepherdDaemon {
           const workspace = this.requireWorkspace(message.workspaceId);
           const status = await gitStatus(workspace.rootPath);
           if (!status?.linked) throw new Error("workspace is not a linked worktree");
+          if (process.platform === "win32") {
+            // Windows cannot delete a directory that a running process (the
+            // workspace's shells) has as its working directory, so close
+            // the panes first. Reopen the checkout if Git then refuses, as
+            // it does for a dirty worktree without force.
+            this.closeWorkspace(workspace.id);
+            await this.releaseClosedCheckouts();
+            try {
+              await removeWorktree(status.repoRoot, status.checkoutPath, message.force ?? false);
+            } catch (error) {
+              this.createWorkspace(workspace.name, workspace.rootPath);
+              throw error;
+            }
+            return { path: status.checkoutPath, removed: true };
+          }
           await removeWorktree(status.repoRoot, status.checkoutPath, message.force ?? false);
           this.closeWorkspace(workspace.id);
           return { path: status.checkoutPath, removed: true };
@@ -761,6 +781,7 @@ export class ShepherdDaemon {
         if (open) {
           throw new Error(`close workspace ${open.name || open.id} before removing its worktree`);
         }
+        if (process.platform === "win32") await this.releaseClosedCheckouts();
         await removeWorktree(root, target, message.force ?? false);
         return { path: target, removed: true };
       }
@@ -1952,6 +1973,16 @@ export class ShepherdDaemon {
       changed = true;
     }
     return changed;
+  }
+
+  /** Windows cannot delete a directory that a running process has as its
+   * working directory. Before removing a checkout, let just-closed panes'
+   * shells exit and let an in-flight Git refresh (run inside the closed
+   * workspace's directory) finish. */
+  private async releaseClosedCheckouts(timeoutMs = 3_000): Promise<void> {
+    const deadline = Date.now() + timeoutMs;
+    await PaneTerminal.closedPanesExited(timeoutMs);
+    while (this.refreshingGit && Date.now() < deadline) await sleep(50);
   }
 
   /** Refresh outside state/render paths, discarding results for old directories. */
@@ -3455,18 +3486,6 @@ function requiredAliasString(value: unknown): string {
 
 function optionalAliasString(value: unknown): string | undefined {
   return typeof value === "string" && value.trim() ? value : undefined;
-}
-
-function canonicalPath(value: string): string {
-  const resolved = path.resolve(value);
-  try {
-    return fs.realpathSync(resolved);
-  } catch {
-    return path.join(
-      fs.realpathSync(path.dirname(resolved)),
-      path.basename(resolved),
-    );
-  }
 }
 
 function requiredAliasLayout(value: unknown): LayoutNode {

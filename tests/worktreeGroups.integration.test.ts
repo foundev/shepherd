@@ -17,7 +17,7 @@ describe("expanded worktrees", () => {
   const previousConfig = process.env.SHEPHERD_CONFIG_PATH;
 
   beforeAll(async () => {
-    root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "shepherd-wt-groups-")));
+    root = fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), "shepherd-wt-groups-")));
     repository = path.join(root, "app");
     fs.mkdirSync(repository);
     await git(repository, ["init", "-b", "main"]);
@@ -42,7 +42,7 @@ describe("expanded worktrees", () => {
     connection.close();
     await daemon.stop();
     process.env.SHEPHERD_CONFIG_PATH = previousConfig;
-    fs.rmSync(root, { recursive: true, force: true });
+    fs.rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   });
 
   async function state(): Promise<StateView> {
