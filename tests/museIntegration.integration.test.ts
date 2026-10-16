@@ -56,7 +56,15 @@ afterEach(async () => {
     const deadline = Date.now() + 5_000;
     while (live.some(alive) && Date.now() < deadline) await new Promise((resolve) => setTimeout(resolve, 50));
   }
-  fs.rmSync(root, { recursive: true, force: true, maxRetries: 20, retryDelay: 100 });
+  try {
+    fs.rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+  } catch (error) {
+    // An MSYS process exec'd from the fake agent's shim can escape both the
+    // pane's process tree and the pid list above and keep its cwd busy; the
+    // assertions have already run, so leave the temp directory behind.
+    const code = (error as NodeJS.ErrnoException).code;
+    if (process.platform !== "win32" || (code !== "EBUSY" && code !== "EPERM")) throw error;
+  }
 });
 
 function writeJson(file: string, value: unknown) {
